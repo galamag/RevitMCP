@@ -1,0 +1,33 @@
+# .NET
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# Node.js
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Revit files
+*.rvt
+*.rfa
+*.rbak
+
+# Secrets and logs
+.env
+.env.*
+*.log
+
+# Local tool data
+.remember/
+.superpowers/
+.claude/settings.local.json
