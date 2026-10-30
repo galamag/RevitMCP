@@ -39,7 +39,7 @@ Full history: the `Журнал решений` note in the vault. Open question
 3. **Never expand scope.** One task is one patch. Report other problems separately and wait for a go-ahead.
 4. **The core is protected.** Do not change threading, transaction or protocol code without an explicit request. The exact file list goes here once the code exists.
 5. **Verify after changes.** Build, run the tests, and exercise plugin changes in live Revit. If you cannot verify something, say so. Claude may restart Revit for this, but only when every open document is saved in `%USERPROFILE%\Documents\RevitMCP`, and never by killing the process.
-6. **Install nothing without consent.**
+6. **Install nothing without consent.** Keep dependencies to a minimum and prefer what Node and .NET already provide. Before adding an npm or NuGet package, check GitHub Advisory Database and make sure the version is at least 14 days old unless it is a security fix. Pin exact versions and commit lock files. npm install scripts stay off. Verify downloaded programs by SHA-512 from two official sources and by digital signature before running them.
 7. **Do not copy code from other projects.** Ideas only, and only with a checked license.
 
 ## Revit traps
@@ -55,14 +55,9 @@ Full history: the `Журнал решений` note in the vault. Open question
 ## Environment
 
 - Revit 2027.3 (27.3.0.28): `C:\Program Files\Autodesk\Revit 2027`, which also holds `RevitAPI.dll`, `RevitAPIUI.dll` and the API descriptions `RevitAPI.xml`, `RevitAPIUI.xml`.
-- Revit 2027 runs on .NET 10, so the plugin targets `net10.0-windows`.
+- Revit 2027 runs on .NET 10, so the plugin targets `net10.0-windows`. .NET SDK 10.0.403 is installed.
 - User add-in folder: `%APPDATA%\Autodesk\Revit\Addins\2027`. The all-users folder is now under `C:\Program Files`, not `ProgramData`.
 - Family library: `C:\ProgramData\Autodesk\RVT 2027\Libraries\Russian`. It is the only real content set installed. Russian project templates are in `C:\ProgramData\Autodesk\RVT 2027\Templates\Russian`.
-- **The .NET 10 SDK is not installed.** The plugin cannot be built without it. The user will install it before coding starts:
-
-```bash
-winget install Microsoft.DotNet.SDK.10
-```
 
 ## Build and run
 
