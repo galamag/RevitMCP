@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Text;
-using RevitMCP.Bridge;
 using Xunit;
 
 namespace RevitMCP.Bridge.Tests;
@@ -35,6 +34,37 @@ public class FramingTests
 
         Assert.NotNull(read);
         Assert.Equal("Уровень 1", Encoding.UTF8.GetString(read));
+    }
+
+    [Fact]
+    public async Task ZeroLengthFrame_Roundtrips()
+    {
+        using var ms = new MemoryStream();
+        await Framing.WriteAsync(ms, [], Ct);
+        ms.Position = 0;
+
+        var read = await Framing.ReadAsync(ms, Ct);
+
+        Assert.NotNull(read);
+        Assert.Empty(read);
+    }
+
+    [Fact]
+    public async Task FrameOfExactlyMaxBytes_IsAccepted()
+    {
+        var payload = new byte[Limits.MaxFrameBytes];
+        payload[0] = 0x11;
+        payload[^1] = 0x22;
+
+        using var ms = new MemoryStream();
+        await Framing.WriteAsync(ms, payload, Ct);
+        ms.Position = 0;
+        var read = await Framing.ReadAsync(ms, Ct);
+
+        Assert.NotNull(read);
+        Assert.Equal(Limits.MaxFrameBytes, read.Length);
+        Assert.Equal(0x11, read[0]);
+        Assert.Equal(0x22, read[^1]);
     }
 
     [Fact]
