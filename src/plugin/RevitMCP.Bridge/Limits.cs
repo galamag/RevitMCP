@@ -5,4 +5,10 @@ public static class Limits
 {
     /// <summary>Maximum JSON payload size of a single frame, in bytes.</summary>
     public const int MaxFrameBytes = 16 * 1024 * 1024;
+
+    /// <summary>How long a request may wait in the queue before it is cancelled as expired.</summary>
+    public static readonly TimeSpan QueueTtl = TimeSpan.FromSeconds(120);
+
+    /// <summary>How many requests, and so how many results, the request store keeps.</summary>
+    public const int ResultCapacity = 256;
 }
