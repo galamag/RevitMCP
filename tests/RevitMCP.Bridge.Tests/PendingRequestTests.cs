@@ -57,6 +57,47 @@ public class PendingRequestTests
     }
 
     [Fact]
+    public void Cancel_FailsOnceRunning_AndRealResultStillRecorded()
+    {
+        var clock = new FakeTimeProvider();
+        var queue = new RequestQueue(clock);
+        var request = TestRequests.Make("a", clock.GetUtcNow());
+        queue.Enqueue(request);
+        Assert.Same(request, queue.TryDequeue());
+
+        Assert.False(request.Cancel("client timeout"));
+        Assert.Equal(RequestState.Running, request.State);
+        Assert.Null(request.CancelReason);
+        Assert.False(request.Completion.IsCompleted);
+
+        Assert.True(request.Complete(TestRequests.Json("{}")));
+        Assert.Equal(RequestState.Succeeded, request.State);
+    }
+
+    [Fact]
+    public async Task DequeuedRequest_IsNeverCancelledWhenHandedOut()
+    {
+        var clock = new FakeTimeProvider();
+        var queue = new RequestQueue(clock);
+        for (var i = 0; i < 200; i++)
+        {
+            var request = TestRequests.Make($"r{i}", clock.GetUtcNow());
+            queue.Enqueue(request);
+
+            var canceller = Task.Run(() => request.Cancel("race"));
+            var dequeued = queue.TryDequeue();
+            var cancelled = await canceller;
+
+            // Exactly one side wins: either the consumer got a Running request, or the cancel did.
+            Assert.True(dequeued is not null ^ cancelled);
+            if (dequeued is not null)
+            {
+                Assert.Equal(RequestState.Running, dequeued.State);
+            }
+        }
+    }
+
+    [Fact]
     public void NewRequestIsQueued_AndCompletionIsPending()
     {
         var request = TestRequests.Make("a", Now);

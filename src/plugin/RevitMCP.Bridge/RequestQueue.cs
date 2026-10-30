@@ -31,26 +31,32 @@ public sealed class RequestQueue(TimeProvider clock)
     {
         lock (_gate)
         {
-            var now = _clock.GetUtcNow();
+            ExpireStaleLocked();
             while (_items.First is { } node)
             {
                 _items.RemoveFirst();
-                var request = node.Value;
-
-                if (now - request.EnqueuedAt > Limits.QueueTtl)
-                {
-                    request.Cancel($"The request expired after waiting more than {Limits.QueueTtl.TotalSeconds:0} s in the queue.");
-                    continue;
-                }
 
                 // Fails when the request was cancelled directly while it waited; skip it then.
-                if (request.TryMarkRunning())
+                if (node.Value.TryMarkRunning())
                 {
-                    return request;
+                    return node.Value;
                 }
             }
 
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Cancels every queued request that waited longer than <see cref="Limits.QueueTtl"/> (reason contains
+    /// "expired") and removes it from the queue. Returns how many requests were expired. Needs no dequeue,
+    /// so it can run on a timer while the consumer is busy or blocked.
+    /// </summary>
+    public int ExpireStale()
+    {
+        lock (_gate)
+        {
+            return ExpireStaleLocked();
         }
     }
 
@@ -61,6 +67,7 @@ public sealed class RequestQueue(TimeProvider clock)
 
         lock (_gate)
         {
+            ExpireStaleLocked();
             for (var node = _items.First; node is not null; node = node.Next)
             {
                 if (node.Value.Id != id)
@@ -83,7 +90,7 @@ public sealed class RequestQueue(TimeProvider clock)
         {
             lock (_gate)
             {
-                Prune();
+                ExpireStaleLocked();
                 return _items.Count;
             }
         }
@@ -96,7 +103,7 @@ public sealed class RequestQueue(TimeProvider clock)
         {
             lock (_gate)
             {
-                Prune();
+                ExpireStaleLocked();
                 return _items.First is { } node
                     ? (_clock.GetUtcNow() - node.Value.EnqueuedAt).TotalSeconds
                     : 0;
@@ -104,18 +111,34 @@ public sealed class RequestQueue(TimeProvider clock)
         }
     }
 
-    /// <summary>Drops requests that finished (for example cancelled by their client) while they waited.</summary>
-    private void Prune()
+    /// <summary>
+    /// Cancels queued requests older than the TTL and drops requests that finished (for example cancelled by
+    /// their client) while they waited. Must be called with <c>_gate</c> held.
+    /// </summary>
+    private int ExpireStaleLocked()
     {
+        var now = _clock.GetUtcNow();
+        var expired = 0;
         for (var node = _items.First; node is not null;)
         {
             var next = node.Next;
-            if (node.Value.State != RequestState.Queued)
+            var request = node.Value;
+            if (request.State != RequestState.Queued)
             {
                 _items.Remove(node);
+            }
+            else if (now - request.EnqueuedAt > Limits.QueueTtl)
+            {
+                _items.Remove(node);
+                if (request.Cancel($"The request expired after waiting more than {Limits.QueueTtl.TotalSeconds:0} s in the queue."))
+                {
+                    expired++;
+                }
             }
 
             node = next;
         }
+
+        return expired;
     }
 }

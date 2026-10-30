@@ -6,7 +6,7 @@ namespace RevitMCP.Bridge;
 /// One request travelling from a socket thread to the Revit main thread and back.
 /// A request is created <see cref="RequestState.Queued"/>, may become <see cref="RequestState.Running"/>,
 /// and ends in exactly one of <see cref="RequestState.Succeeded"/>, <see cref="RequestState.Failed"/> or
-/// <see cref="RequestState.Cancelled"/>; the first terminal transition wins. Safe for concurrent use.
+/// <see cref="RequestState.Cancelled"/>; the first terminal transition wins, and a running request can no longer be cancelled. Safe for concurrent use.
 /// </summary>
 public sealed class PendingRequest(string id, string method, JsonElement @params, DateTimeOffset enqueuedAt)
 {
@@ -69,7 +69,7 @@ public sealed class PendingRequest(string id, string method, JsonElement @params
     /// <summary>Marks the request as succeeded. Returns <c>false</c> if it had already finished.</summary>
     public bool Complete(JsonElement result)
     {
-        if (!TryFinish(RequestState.Succeeded, null))
+        if (!TryFinish(RequestState.Succeeded, null, requireQueued: false))
         {
             return false;
         }
@@ -81,7 +81,7 @@ public sealed class PendingRequest(string id, string method, JsonElement @params
     /// <summary>Marks the request as failed. Returns <c>false</c> if it had already finished.</summary>
     public bool Fail(int code, string message)
     {
-        if (!TryFinish(RequestState.Failed, null))
+        if (!TryFinish(RequestState.Failed, null, requireQueued: false))
         {
             return false;
         }
@@ -90,10 +90,14 @@ public sealed class PendingRequest(string id, string method, JsonElement @params
         return true;
     }
 
-    /// <summary>Marks the request as cancelled. Returns <c>false</c> if it had already finished.</summary>
+    /// <summary>
+    /// Marks the request as cancelled. Succeeds only while the request is <see cref="RequestState.Queued"/>:
+    /// once it runs, Revit may already be changing the model, so the real result must be recorded instead.
+    /// Returns <c>false</c> if the request is running or has finished.
+    /// </summary>
     public bool Cancel(string reason)
     {
-        if (!TryFinish(RequestState.Cancelled, reason))
+        if (!TryFinish(RequestState.Cancelled, reason, requireQueued: true))
         {
             return false;
         }
@@ -117,11 +121,11 @@ public sealed class PendingRequest(string id, string method, JsonElement @params
         }
     }
 
-    private bool TryFinish(RequestState terminal, string? cancelReason)
+    private bool TryFinish(RequestState terminal, string? cancelReason, bool requireQueued)
     {
         lock (_gate)
         {
-            if (IsTerminal(_state))
+            if (IsTerminal(_state) || (requireQueued && _state != RequestState.Queued))
             {
                 return false;
             }

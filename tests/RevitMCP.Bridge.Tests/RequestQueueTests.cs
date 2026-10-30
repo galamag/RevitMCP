@@ -70,6 +70,68 @@ public class RequestQueueTests
     }
 
     [Fact]
+    public async Task Count_ExpiresStaleRequestsWithoutDequeue()
+    {
+        var clock = new FakeTimeProvider();
+        var queue = new RequestQueue(clock);
+        var stale = TestRequests.Make("stale", clock.GetUtcNow());
+        queue.Enqueue(stale);
+        clock.Advance(Limits.QueueTtl + TimeSpan.FromSeconds(1));
+
+        Assert.Equal(0, queue.Count);
+
+        Assert.Equal(RequestState.Cancelled, stale.State);
+        Assert.Contains("expired", stale.CancelReason);
+        Assert.True(stale.Completion.IsCompleted);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => stale.Completion);
+    }
+
+    [Fact]
+    public void ExpireStale_CancelsOnlyStaleQueuedRequests_AndReturnsTheirNumber()
+    {
+        var clock = new FakeTimeProvider();
+        var queue = new RequestQueue(clock);
+        var running = TestRequests.Make("running", clock.GetUtcNow());
+        var stale1 = TestRequests.Make("stale1", clock.GetUtcNow());
+        var stale2 = TestRequests.Make("stale2", clock.GetUtcNow());
+        queue.Enqueue(running);
+        queue.Enqueue(stale1);
+        queue.Enqueue(stale2);
+        Assert.Same(running, queue.TryDequeue());
+        clock.Advance(Limits.QueueTtl + TimeSpan.FromSeconds(1));
+        var fresh = TestRequests.Make("fresh", clock.GetUtcNow());
+        queue.Enqueue(fresh);
+
+        Assert.Equal(2, queue.ExpireStale());
+
+        Assert.Equal(RequestState.Cancelled, stale1.State);
+        Assert.Equal(RequestState.Cancelled, stale2.State);
+        Assert.Equal(RequestState.Running, running.State);
+        Assert.Equal(RequestState.Queued, fresh.State);
+        Assert.Equal(1, queue.Count);
+        Assert.Equal(0, queue.ExpireStale());
+    }
+
+    [Fact]
+    public void OldestQueuedSeconds_And_TryCancel_ApplyTheTtl()
+    {
+        var clock = new FakeTimeProvider();
+        var queue = new RequestQueue(clock);
+        var first = TestRequests.Make("first", clock.GetUtcNow());
+        var second = TestRequests.Make("second", clock.GetUtcNow());
+        queue.Enqueue(first);
+        queue.Enqueue(second);
+        clock.Advance(Limits.QueueTtl + TimeSpan.FromSeconds(1));
+
+        Assert.Equal(0, queue.OldestQueuedSeconds);
+        Assert.Equal(RequestState.Cancelled, first.State);
+        Assert.Contains("expired", first.CancelReason);
+
+        Assert.False(queue.TryCancel("second"));
+        Assert.Contains("expired", second.CancelReason);
+    }
+
+    [Fact]
     public void TryCancel_WorksOnlyWhileQueued()
     {
         var clock = new FakeTimeProvider();
