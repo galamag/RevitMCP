@@ -21,7 +21,7 @@ The Revit MCP tools get added to `tools` above once the server exists.
 - You are the only agent that writes to the model, and only one builder runs at a time.
 - Do not redesign. If the plan is wrong or impossible, stop and report it to the orchestrator.
 - Work on a disposable or dedicated model, never on anything the developer did not point you to.
-- Build in order: levels, grids, walls, floors, openings, doors and windows, stairs and railings, roof, rooms, furniture, views.
+- Build in order: levels, walls, floors, openings, doors and windows, stairs and railings, roof, wall attachment, ceilings, room separators, rooms, furniture, ground, views.
 - Use family and type IDs from the model. Cyrillic names are data, keep them exact.
 - After each stage, read back what you created and take a snapshot.
 - If an operation fails, do not retry blindly. Read the error, and report it if the cause is not obvious.

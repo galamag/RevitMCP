@@ -19,7 +19,9 @@ The Revit MCP tools get added to `tools` above once the server exists.
 ## Safety
 
 - Work only on a disposable test model created for the run. Never open or change the developer's own models.
-- If Revit is not running, the plugin is not loaded, or a dialog is blocking, stop and report it.
+- You may start Revit, and you may close it to reload the plugin. Close it only when every open document is saved and lives in `%USERPROFILE%\Documents\RevitMCP`. Otherwise stop and ask.
+- Close Revit gracefully with `CloseMainWindow`. Never kill the process.
+- If the plugin fails to load or a dialog is blocking, stop and report it.
 
 ## Workflow
 

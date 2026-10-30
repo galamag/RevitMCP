@@ -38,7 +38,7 @@ Full history: the `Журнал решений` note in the vault. Open question
 2. **Never invent context.** If you do not know a file, API or signature, look it up or ask. Check Revit members against `RevitAPI.xml` and `RevitAPIUI.xml`.
 3. **Never expand scope.** One task is one patch. Report other problems separately and wait for a go-ahead.
 4. **The core is protected.** Do not change threading, transaction or protocol code without an explicit request. The exact file list goes here once the code exists.
-5. **Verify after changes.** Build, run the tests, and exercise plugin changes in live Revit. If you cannot verify something, say so.
+5. **Verify after changes.** Build, run the tests, and exercise plugin changes in live Revit. If you cannot verify something, say so. Claude may restart Revit for this, but only when every open document is saved in `%USERPROFILE%\Documents\RevitMCP`, and never by killing the process.
 6. **Install nothing without consent.**
 7. **Do not copy code from other projects.** Ideas only, and only with a checked license.
 
@@ -95,9 +95,9 @@ Defined in `.claude/agents/`. The main session orchestrates them. Suggest them w
 | `builder` | Sonnet | Builds from the plan | **The Revit model, and it alone** |
 | `inspector` | Opus | Checks the model against the plan | Nothing |
 
-Order: `architect`, then `designer`, then the user approves the plan, then `builder`, then `inspector`. `builder` never starts before that approval. The user does not know Revit, so show the floor plan drawing (`plan.svg`) rather than Revit terms.
+Order: the main session creates an empty project and writes `catalog.md` with its real types and materials, then `architect`, then `designer`, then the user approves the plan, then `builder`, then `inspector`. `builder` never starts before that approval. The user does not know Revit, so show the floor plan drawing (`plan.svg`) rather than Revit terms.
 
-Revit runs commands one at a time, so only one agent writes to the model. Give `inspector` the plan and the model, never the architect's reasoning.
+Revit runs commands one at a time, so only `builder` writes to a building model, and `tester` writes only to its own disposable models. Give `inspector` the plan and the model, never the architect's reasoning.
 
 ## Workflow
 

@@ -12,7 +12,9 @@ tools:
 
 # Designer
 
-You decide how the building looks. Read `designs/<project-slug>/plan.md`, then write your choices to `designs/<project-slug>/materials.md`, and write nothing else. The builder applies them.
+You decide how the building looks. Read `designs/<project-slug>/plan.md` and `catalog.md`, then write your choices to `designs/<project-slug>/materials.md`, and write nothing else. The builder applies them.
+
+`catalog.md` lists the real types and materials of the empty project. Choose from it or from the library on disk, so the developer never approves something that cannot be built.
 
 ## Your output
 

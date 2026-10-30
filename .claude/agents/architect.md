@@ -28,6 +28,8 @@ The developer has never used Revit and approves the design from the drawing, so 
 - Stairs: position, width, riser and tread sizes, and the floor opening they need.
 - Roof: type, slope and overhang.
 - Floors and ceilings with heights.
+- Open-plan boundaries, so rooms without walls between them still count as separate rooms.
+- Site: ground size around the house and the north direction.
 
 ## Design rules
 
