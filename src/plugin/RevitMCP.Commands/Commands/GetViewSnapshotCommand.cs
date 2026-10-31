@@ -125,7 +125,8 @@ public sealed class GetViewSnapshotCommand : ICommand
 
         document.ExportImage(options);
 
-        var path = Path.Combine(Folder, options.FilePath + ImageExportOptions.GetFileName(document, view.Id));
+        // Live Revit: GetFileName gives only what follows FilePath, without the extension, like " - 3D View - Name".
+        var path = options.FilePath + ImageExportOptions.GetFileName(document, view.Id) + ".png";
 
         return File.Exists(path)
             ? path
