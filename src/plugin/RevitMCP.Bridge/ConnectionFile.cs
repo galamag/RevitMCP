@@ -3,7 +3,12 @@ using System.Text.Json;
 namespace RevitMCP.Bridge;
 
 /// <summary>What a client needs to reach the bridge.</summary>
-public sealed record ConnectionInfo(int Port, string Token, int Pid, int ProtocolVersion);
+public sealed record ConnectionInfo(int Port, string Token, int Pid, int ProtocolVersion)
+{
+    /// <summary>Leaves the token out, so logging this record cannot leak it.</summary>
+    public override string ToString() =>
+        $"ConnectionInfo {{ Port = {Port}, Pid = {Pid}, ProtocolVersion = {ProtocolVersion} }}";
+}
 
 /// <summary>
 /// The <c>connection.json</c> file that tells clients where the bridge listens. Its folder sits under

@@ -179,8 +179,8 @@ public class BridgeServerTests
         await using var client = await bridge.ConnectAsync();
         await client.SendAsync("waiting", Queued);
         await bridge.WaitForAdmissionAsync(client);
+        await bridge.WaitForSignalAsync();
         bridge.Clock.Advance(TimeSpan.FromSeconds(7));
-        var signalled = bridge.Signal.Calls;
 
         var status = Result(await client.CallAsync("status", MethodNames.GetStatus));
 
@@ -188,7 +188,7 @@ public class BridgeServerTests
         Assert.Equal(BridgeServer.ProtocolVersion, status.GetProperty("protocolVersion").GetInt32());
         Assert.Equal(1, status.GetProperty("queueLength").GetInt32());
         Assert.Equal(7, status.GetProperty("oldestQueuedSeconds").GetDouble(), precision: 3);
-        Assert.Equal(signalled, bridge.Signal.Calls);
+        Assert.Equal(1, bridge.Signal.Calls);
     }
 
     [Fact]
@@ -277,6 +277,34 @@ public class BridgeServerTests
         Assert.Equal(first.GetRawText(), repeat.GetRawText());
         Assert.Null(bridge.Queue.TryDequeue());
         Assert.Equal(1, bridge.Signal.Calls);
+    }
+
+    [Fact]
+    public async Task SameIdWithAnotherMethod_IsRefused_AndGetsNoResult()
+    {
+        await using var bridge = await Bridge.StartAsync();
+        await using var client = await bridge.ConnectAsync();
+        var original = TestRequests.Make("same", bridge.Clock.GetUtcNow(), method: "another_method");
+        original.Complete(TestRequests.Json("""{"value":1}"""));
+        Assert.True(bridge.Store.TryAdd(original));
+
+        var response = await client.CallAsync("same", Queued);
+
+        Assert.Equal(JsonRpcCodes.InvalidParams, ErrorCode(response));
+        Assert.False(response.TryGetProperty("result", out _));
+        Assert.Equal(0, bridge.Queue.Count);
+        Assert.Equal(0, bridge.Signal.Calls);
+    }
+
+    [Fact]
+    public void ParsedRequest_DoesNotPrintTheToken()
+    {
+        var frame = Utf8($$"""{"id":"a","method":"get_status","params":{},"token":"{{BridgeTestClient.ValidToken}}","protocolVersion":1}""");
+
+        var printed = JsonRpcRequest.TryParse(frame)!.ToString();
+
+        Assert.DoesNotContain(BridgeTestClient.ValidToken, printed);
+        Assert.Contains("get_status", printed);
     }
 
     [Fact]
@@ -376,6 +404,7 @@ public class BridgeServerTests
         var first = await bridge.ConnectAsync();
         await first.SendAsync("lost", Queued);
         var request = await bridge.DequeueAsync();
+        await bridge.WaitForSignalAsync();
         await first.DisposeAsync();
         request.Complete(TestRequests.Json("""{"value":1}"""));
         await using var second = await bridge.ConnectAsync();
@@ -497,23 +526,109 @@ public class BridgeServerTests
     {
         await using var bridge = await Bridge.StartAsync();
         await using var client = await bridge.ConnectAsync();
-        PendingRequest? running = null;
+        var taken = new TaskCompletionSource<PendingRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
         bridge.Signal.OnSignal = () =>
         {
             // An earlier raise of the event got to the request first, so Revit runs it despite this denial.
-            running = bridge.Queue.TryDequeue();
+            taken.SetResult(bridge.Queue.TryDequeue()!);
             return SignalResult.Denied;
         };
 
         await client.SendAsync("req-1", Queued);
-        await bridge.WaitForAdmissionAsync(client);
-        Assert.NotNull(running);
+        var running = await taken.Task.WaitAsync(BridgeTestClient.Timeout, Ct);
+
+        // The denial is handled off the read loop with nothing to observe, so give a wrong handler time to act.
+        await Task.Delay(TimeSpan.FromMilliseconds(100), Ct);
         Assert.Equal(RequestState.Running, running.State);
 
         running.Complete(TestRequests.Json("""{"value":1}"""));
         var response = await client.ReceiveAsync("req-1");
 
         Assert.Equal(1, Result(response).GetProperty("value").GetInt32());
+    }
+
+    [Fact]
+    public async Task BlockedSignal_DoesNotHoldUpTheFramesBehindIt()
+    {
+        using var release = new ManualResetEventSlim();
+        await using var bridge = await Bridge.StartAsync();
+        await using var client = await bridge.ConnectAsync();
+        bridge.Signal.OnSignal = () =>
+        {
+            release.Wait(BridgeTestClient.Timeout * 2);
+            return SignalResult.Accepted;
+        };
+
+        try
+        {
+            await client.SendAsync("req-1", Queued);
+            var status = await client.CallAsync("status", MethodNames.GetStatus);
+
+            Assert.Equal(1, Result(status).GetProperty("queueLength").GetInt32());
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
+
+    [Fact]
+    public async Task StopAsync_DoesNotWaitForABlockedSignal()
+    {
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var bridge = await Bridge.StartAsync();
+        await using var client = await bridge.ConnectAsync();
+        bridge.Signal.OnSignal = () =>
+        {
+            entered.SetResult();
+            release.Wait(BridgeTestClient.Timeout * 2);
+            return SignalResult.Accepted;
+        };
+
+        try
+        {
+            await client.SendAsync("req-1", Queued);
+            await entered.Task.WaitAsync(BridgeTestClient.Timeout, Ct);
+
+            await bridge.Server.StopAsync().WaitAsync(BridgeTestClient.Timeout, Ct);
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
+
+    [Fact]
+    public async Task SignalDenied_FailsTheRequestEvenIfItsConnectionIsGone()
+    {
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var bridge = await Bridge.StartAsync();
+        var client = await bridge.ConnectAsync();
+        bridge.Signal.OnSignal = () =>
+        {
+            entered.SetResult();
+            release.Wait(BridgeTestClient.Timeout * 2);
+            return SignalResult.Denied;
+        };
+
+        try
+        {
+            await client.SendAsync("req-1", Queued);
+            await entered.Task.WaitAsync(BridgeTestClient.Timeout, Ct);
+            await client.DisposeAsync();
+            await bridge.AssertServesNewConnectionAsync();
+        }
+        finally
+        {
+            release.Set();
+        }
+
+        await bridge.Store.Find("req-1")!.Completion
+            .ContinueWith(_ => { }, Ct, TaskContinuationOptions.None, TaskScheduler.Default)
+            .WaitAsync(BridgeTestClient.Timeout, Ct);
+        Assert.Equal(RequestState.Failed, bridge.Store.GetState("req-1"));
     }
 
     [Fact]
@@ -533,12 +648,108 @@ public class BridgeServerTests
     }
 
     [Fact]
+    public async Task FailureInsideTheExpirySweep_StaysOnTheTimerThread()
+    {
+        var clock = new FakeTimeProvider();
+        var queue = new RequestQueue(new BrokenClock());
+        var server = new BridgeServer(
+            BridgeTestClient.ValidToken,
+            queue,
+            new RequestStore(Limits.ResultCapacity),
+            new Bridge.FakeSignal(),
+            clock);
+        await server.StartAsync();
+
+        try
+        {
+            // FakeTimeProvider fires on this thread, so an exception that left the callback would land here.
+            clock.Advance(Limits.ExpirySweepInterval);
+        }
+        finally
+        {
+            await server.StopAsync().WaitAsync(BridgeTestClient.Timeout, Ct);
+        }
+    }
+
+    [Fact]
+    public async Task SilentPeers_AreClosedAtTheAuthDeadline_AndFreeTheirSlots()
+    {
+        await using var bridge = await Bridge.StartAsync();
+        var peers = new List<BridgeTestClient>();
+        for (var i = 0; i < Limits.MaxConnections; i++)
+        {
+            peers.Add(await bridge.ConnectAsync());
+        }
+
+        await bridge.WaitForConnectionsAsync(Limits.MaxConnections);
+        bridge.Clock.Advance(Limits.AuthTimeout);
+
+        foreach (var peer in peers)
+        {
+            await peer.AssertClosedAsync();
+        }
+
+        await bridge.AssertServesNewConnectionAsync();
+
+        foreach (var peer in peers)
+        {
+            await peer.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WrongTokenPeer_IsClosedAtTheAuthDeadline_AndCannotExtendIt()
+    {
+        var half = Limits.AuthTimeout / 2;
+        await using var bridge = await Bridge.StartAsync();
+        await using var client = await bridge.ConnectAsync();
+        await bridge.WaitForConnectionsAsync(1);
+
+        bridge.Clock.Advance(half);
+        var response = await client.CallAsync("bad", Queued, token: "wrong");
+        bridge.Clock.Advance(Limits.AuthTimeout - half);
+
+        Assert.Equal(JsonRpcCodes.Unauthorized, ErrorCode(response));
+        await client.AssertClosedAsync();
+    }
+
+    [Fact]
+    public async Task FrameRejectedAfterTheTokenCheck_DoesNotDisarmTheAuthDeadline()
+    {
+        await using var bridge = await Bridge.StartAsync();
+        await using var client = await bridge.ConnectAsync();
+        await bridge.WaitForConnectionsAsync(1);
+
+        var response = await client.CallAsync("nope", "unknown_method");
+        bridge.Clock.Advance(Limits.AuthTimeout);
+
+        Assert.Equal(JsonRpcCodes.MethodNotFound, ErrorCode(response));
+        await client.AssertClosedAsync();
+    }
+
+    [Fact]
+    public async Task AuthenticatedIdleConnection_OutlivesTheAuthDeadline()
+    {
+        await using var bridge = await Bridge.StartAsync();
+        await using var client = await bridge.ConnectAsync();
+        await bridge.WaitForConnectionsAsync(1);
+
+        bridge.Clock.Advance(Limits.AuthTimeout - TimeSpan.FromSeconds(1));
+        await client.CallAsync("first", MethodNames.GetStatus);
+        bridge.Clock.Advance(Limits.AuthTimeout * 3);
+        var status = await client.CallAsync("second", MethodNames.GetStatus);
+
+        Assert.True(status.TryGetProperty("result", out _));
+    }
+
+    [Fact]
     public async Task FullStore_AnswersBusy_AndEnqueuesNothing()
     {
         await using var bridge = await Bridge.StartAsync(storeCapacity: 1);
         await using var client = await bridge.ConnectAsync();
         await client.SendAsync("first", Queued);
         await bridge.WaitForAdmissionAsync(client);
+        await bridge.WaitForSignalAsync();
 
         var response = await client.CallAsync("second", Queued);
 
@@ -701,6 +912,11 @@ public class BridgeServerTests
     private static IEnumerable<IPEndPoint> ListenersOn(int port) =>
         IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Where(endpoint => endpoint.Port == port);
 
+    private sealed class BrokenClock : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => throw new InvalidOperationException("The clock failed.");
+    }
+
     /// <summary>A running server with everything around it faked, and nothing draining its queue.</summary>
     private sealed class Bridge : IAsyncDisposable
     {
@@ -756,6 +972,25 @@ public class BridgeServerTests
                     return request;
                 }
 
+                await Task.Delay(TimeSpan.FromMilliseconds(5), timeout.Token);
+            }
+        }
+
+        /// <summary>Returns once the signal was called. It runs off the read loop, so admission does not imply it.</summary>
+        public Task WaitForSignalAsync() => WaitUntilAsync(() => Signal.Calls >= 1);
+
+        /// <summary>
+        /// Returns once this many connections are being served, each with its deadline armed. The clock must not
+        /// advance before that, or a deadline armed later would miss it. The server's own sweep is one more timer.
+        /// </summary>
+        public Task WaitForConnectionsAsync(int count) => WaitUntilAsync(() => Clock.ActiveTimers == count + 1);
+
+        private static async Task WaitUntilAsync(Func<bool> condition)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            timeout.CancelAfter(BridgeTestClient.Timeout);
+            while (!condition())
+            {
                 await Task.Delay(TimeSpan.FromMilliseconds(5), timeout.Token);
             }
         }

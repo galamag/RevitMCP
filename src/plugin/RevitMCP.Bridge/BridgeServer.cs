@@ -79,7 +79,7 @@ public sealed class BridgeServer
 
         _listener = listener;
         _expiryTimer = _clock.CreateTimer(
-            _ => _queue.ExpireStale(),
+            Guarded(() => _queue.ExpireStale()),
             null,
             Limits.ExpirySweepInterval,
             Limits.ExpirySweepInterval);
@@ -104,6 +104,21 @@ public sealed class BridgeServer
         _listener.Stop();
         await _acceptLoop.ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Wraps a timer callback. An exception left unhandled on a timer thread terminates the process, and this
+    /// process is Revit, with the user's model open. The next tick tries again.
+    /// </summary>
+    private static TimerCallback Guarded(Action action) => _ =>
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception)
+        {
+        }
+    };
 
     private async Task AcceptConnectionsAsync(TcpListener listener)
     {
@@ -146,38 +161,48 @@ public sealed class BridgeServer
         using (client)
         using (var closing = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token))
         {
-            var frames = new List<Task>();
-            try
+            var authDeadline = _clock.CreateTimer(Guarded(closing.Cancel), null, Limits.AuthTimeout, Timeout.InfiniteTimeSpan);
+
+            // Disposed asynchronously, which waits out a running callback, before closing goes away.
+            await using (authDeadline.ConfigureAwait(false))
             {
-                client.NoDelay = true;
-                var connection = new Connection(client.GetStream(), closing.Token);
-                while (await Framing.ReadAsync(connection.Stream, closing.Token).ConfigureAwait(false) is { } frame)
+                var frames = new List<Task>();
+                try
                 {
-                    if (JsonRpcRequest.TryParse(frame) is not { } request)
+                    client.NoDelay = true;
+                    var connection = new Connection(client.GetStream(), closing.Token);
+                    while (await Framing.ReadAsync(connection.Stream, closing.Token).ConfigureAwait(false) is { } frame)
                     {
-                        break;
-                    }
+                        if (JsonRpcRequest.TryParse(frame) is not { } request)
+                        {
+                            break;
+                        }
 
-                    // Awaited here, so a peer that floods frames and never reads the answers stops being read.
-                    if (Reject(request) is { } rejection)
-                    {
-                        await connection.SendAsync(JsonRpcResponse.Error(request.Id, rejection)).ConfigureAwait(false);
-                        continue;
-                    }
+                        // Awaited here, so a peer that floods frames and never reads the answers stops being read.
+                        if (Reject(request) is { } rejection)
+                        {
+                            await connection.SendAsync(JsonRpcResponse.Error(request.Id, rejection)).ConfigureAwait(false);
+                            continue;
+                        }
 
-                    frames.RemoveAll(task => task.IsCompleted);
-                    frames.Add(HandleAsync(connection, request.Id!, request.Method!, request.Params));
+                        // Only an accepted frame gets this far, so rejected ones cannot extend the deadline.
+                        // Disposing again after the first accepted frame does nothing.
+                        await authDeadline.DisposeAsync().ConfigureAwait(false);
+
+                        frames.RemoveAll(task => task.IsCompleted);
+                        frames.Add(HandleAsync(connection, request.Id!, request.Method!, request.Params));
+                    }
                 }
-            }
-            catch (Exception)
-            {
-                // Whatever went wrong belongs to this peer: an oversized or cut frame, a reset, a stop.
-                // Dropping the connection is the whole answer, and the other connections must carry on.
-            }
+                catch (Exception)
+                {
+                    // Whatever went wrong belongs to this peer: an oversized or cut frame, a reset, a missed
+                    // deadline, a stop. Dropping the connection is the whole answer, and the others carry on.
+                }
 
-            // Results of requests still waiting stay in the store, where the client can fetch them.
-            await closing.CancelAsync().ConfigureAwait(false);
-            await Task.WhenAll(frames).ConfigureAwait(false);
+                // Results of requests still waiting stay in the store, where the client can fetch them.
+                await closing.CancelAsync().ConfigureAwait(false);
+                await Task.WhenAll(frames).ConfigureAwait(false);
+            }
         }
     }
 
@@ -295,25 +320,39 @@ public sealed class BridgeServer
         if (_store.TryAdd(request))
         {
             _queue.Enqueue(request);
-            if (!TrySignal())
-            {
-                // Only while queued: an earlier signal may have put this request in Revit's hands already.
-                request.FailIfQueued(JsonRpcCodes.InternalError, "Revit did not accept the request: its external event was denied.");
-            }
+
+            // Off the read loop, since raising the event may wait. The wait ends with the connection, so a
+            // stuck signal cannot hold up StopAsync, while the task still fails the request if it is denied.
+            await Task.Run(() => SignalOrFail(request)).WaitAsync(closing).ConfigureAwait(false);
         }
-        else if (_store.Find(id) is { } existing)
-        {
-            request = existing;
-        }
-        else
+        else if (_store.Find(id) is not { } existing)
         {
             return JsonRpcResponse.Error(id, new JsonRpcError(
                 JsonRpcCodes.Busy,
                 "The bridge is full of unfinished requests and did not enqueue this one. Try again later."));
         }
+        else if (existing.Method != method)
+        {
+            return JsonRpcResponse.Error(id, new JsonRpcError(
+                JsonRpcCodes.InvalidParams,
+                $"The id '{id}' already belongs to a {existing.Method} request."));
+        }
+        else
+        {
+            request = existing;
+        }
 
         var outcome = await WaitForOutcomeAsync(request, closing).ConfigureAwait(false);
         return outcome.Error is { } error ? JsonRpcResponse.Error(id, error) : JsonRpcResponse.Result(id, outcome.Result!.Value);
+    }
+
+    private void SignalOrFail(PendingRequest request)
+    {
+        if (!TrySignal())
+        {
+            // Only while queued: an earlier signal may have put this request in Revit's hands already.
+            request.FailIfQueued(JsonRpcCodes.InternalError, "Revit did not accept the request: its external event was denied.");
+        }
     }
 
     private bool TrySignal()

@@ -44,7 +44,7 @@ internal sealed class FakeTimeProvider(DateTimeOffset start) : TimeProvider
             due = _timers.Where(timer => timer.NextDue <= _now).ToList();
             foreach (var timer in due)
             {
-                timer.NextDue = _now + timer.Period;
+                timer.NextDue = timer.Period == Timeout.InfiniteTimeSpan ? DateTimeOffset.MaxValue : _now + timer.Period;
             }
         }
 

@@ -60,6 +60,15 @@ public sealed class ConnectionFileTests : IDisposable
     }
 
     [Fact]
+    public void ConnectionInfo_DoesNotPrintTheToken()
+    {
+        var printed = Info.ToString();
+
+        Assert.DoesNotContain(Info.Token, printed);
+        Assert.Contains(Info.Port.ToString(), printed);
+    }
+
+    [Fact]
     public void Write_ProducesCamelCaseJsonThatNodeCanParse()
     {
         ConnectionFile.Write(FilePath, Info);

@@ -31,6 +31,10 @@ internal sealed record JsonRpcRequest(string? Id, string? Method, JsonElement Pa
 {
     private static readonly JsonElement EmptyParams = JsonElement.Parse("{}");
 
+    /// <summary>Leaves the token out, so logging this record cannot leak it.</summary>
+    public override string ToString() =>
+        $"JsonRpcRequest {{ Id = {Id}, Method = {Method}, ProtocolVersion = {ProtocolVersion} }}";
+
     /// <summary>Returns <c>null</c> when the frame is not a JSON object with readable strings.</summary>
     public static JsonRpcRequest? TryParse(byte[] frame)
     {

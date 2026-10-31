@@ -20,4 +20,10 @@ public static class Limits
     /// costs up to <see cref="MaxFrameBytes"/> before the sender is known; this cap bounds that memory.
     /// </summary>
     public const int MaxConnections = 4;
+
+    /// <summary>
+    /// How long a new connection may stay open before a frame passes authentication. Without this deadline,
+    /// silent peers could hold every connection slot forever.
+    /// </summary>
+    public static readonly TimeSpan AuthTimeout = TimeSpan.FromSeconds(10);
 }
