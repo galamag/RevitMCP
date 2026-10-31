@@ -24,6 +24,7 @@ const IMMEDIATE_TIMEOUT_MS = 10_000;
 /** The limits of `widthPx`, which the plugin checks too. */
 const MIN_SNAPSHOT_WIDTH_PX = 100;
 const MAX_SNAPSHOT_WIDTH_PX = 4096;
+const MAX_ELEMENT_IDS = 1000;
 
 /** The limits of the sun, which the plugin checks too. */
 const MAX_SUN_AZIMUTH_DEG = 360;
@@ -157,7 +158,7 @@ export const tools: readonly ToolDefinition[] = [
       "Reads elements of the active project by id, without changing anything. Returns { elements, notFound }. " +
       "elements is [{ id, category, typeName, levelId, boundingBoxMm }] in the order asked, each id once. notFound " +
       "lists the ids that match no element, so an id that is gone does not fail the others. Text that cannot be an " +
-      "element id refuses the whole call. category is a list_types word such as walls where one exists, otherwise " +
+      "element id refuses the whole call, and so do more than 1000 ids. category is a list_types word such as walls where one exists, otherwise " +
       "a stable English BuiltInCategory name such as OST_Levels, and null for an element without a category or in a " +
       "custom one: it does not change with the language of Revit. typeName is the name of the element's type, " +
       "usually Russian, and null when it has none. levelId is a string, and null when the element is not tied to a " +
@@ -165,7 +166,7 @@ export const tools: readonly ToolDefinition[] = [
       "to the model axes and independent of any view. It can be larger than what is visible, and it is null when " +
       "Revit knows no box, as for a type. Related tools: list_types, get_model_info.",
     inputSchema: {
-      ids: z.array(z.string().min(1)).min(1).describe("Element ids as strings, passed on unchanged from other tools."),
+      ids: z.array(z.string().min(1)).min(1).max(MAX_ELEMENT_IDS).describe("Element ids as strings, passed on unchanged from other tools."),
     },
   },
   {

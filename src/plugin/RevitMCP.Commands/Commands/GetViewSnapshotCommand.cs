@@ -67,7 +67,7 @@ public sealed class GetViewSnapshotCommand : ICommand
             ? viewId.GetString()!
             : throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"{Method} needs viewId as a string.");
 
-        var element = document.GetElement(ElementIds.Parse(text, Method));
+        var element = ElementIds.TryParse(text, out var elementId) ? document.GetElement(elementId) : null;
 
         return element is View { IsTemplate: false } view && Exportable.Contains(view.ViewType)
             ? view

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { promisify } from "node:util";
 import type { TestContext } from "node:test";
 
 import { SnapshotError } from "../src/errors.ts";
@@ -112,6 +114,22 @@ describe("snapshot files", () => {
     await refusal(readSnapshot(undefined, folder));
     await refusal(readSnapshot("", folder));
     assert.match((await refusal(readSnapshot(path.join(folder, "gone.png"), folder))).message, /gone\.png/);
+  });
+
+  it("refuses a file that cannot be opened, as a refusal and not as a raw error", async (t) => {
+    const { folder } = await tree(t);
+    const file = path.join(folder, "locked.png");
+    await writeFile(file, PNG);
+    const user = process.env["USERNAME"];
+    assert.ok(user, "USERNAME is not set");
+
+    // Windows only, like the rest of this project: denying read access makes open() fail with EPERM.
+    await promisify(execFile)("icacls", [file, "/deny", `${user}:(RD)`]);
+    try {
+      assert.match((await refusal(readSnapshot(file, folder))).message, /cannot be opened: EPERM/);
+    } finally {
+      await promisify(execFile)("icacls", [file, "/remove:d", user]);
+    }
   });
 
   it("refuses a file too large for an MCP client and says what to do", async (t) => {

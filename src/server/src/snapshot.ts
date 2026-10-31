@@ -14,8 +14,9 @@ interface SnapshotAnswer {
 }
 
 /**
- * The largest file sent to a client. An MCP image travels as base64, a third larger than the file, and the strictest
- * platform in Claude's vision guide takes 5 MB of base64 per image. Revit reaches this at a width of about 3500 pixels.
+ * The largest file sent to a client, as a guard: a client may refuse a larger image. An MCP image travels as base64, a
+ * third larger than the file, and the strictest platform in Claude's vision guide takes 5 MB of base64 per image. For
+ * one scene Revit made 2.17 MB at a width of 3000 pixels and 4.84 MB at 4096, so the size depends on the view.
  */
 export const MAX_SNAPSHOT_BYTES = (5 * 1024 * 1024 * 3) / 4;
 
@@ -76,12 +77,17 @@ async function resolve(target: string): Promise<string> {
 
 /** Reads through one handle, so the size that was checked belongs to the bytes that are read. */
 async function readLimited(file: string): Promise<Buffer> {
-  const handle = await open(file, "r");
+  let handle;
+  try {
+    handle = await open(file, "r");
+  } catch (error) {
+    throw new SnapshotError(`The snapshot ${file} cannot be opened: ${(error as NodeJS.ErrnoException).code ?? "unknown error"}.`, { cause: error });
+  }
   try {
     const { size } = await handle.stat();
     if (size > MAX_SNAPSHOT_BYTES) {
       throw new SnapshotError(
-        `The snapshot takes ${size} bytes, more than the ${MAX_SNAPSHOT_BYTES} an MCP client can be sent. It stays at ${file}. Ask again with a smaller widthPx.`,
+        `The snapshot takes ${size} bytes, more than the ${MAX_SNAPSHOT_BYTES} that is sent, as a client may refuse a larger image. It stays at ${file}. Ask again with a smaller widthPx.`,
       );
     }
     return await handle.readFile();

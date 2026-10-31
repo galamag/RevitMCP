@@ -168,6 +168,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["list_types", {}],
     ["get_elements", { ids: [] }],
     ["get_elements", { ids: [123] }],
+    ["get_elements", { ids: Array.from({ length: 1001 }, (_, index) => String(index + 1)) }],
     ["create_3d_view", { name: "Вид", kind: "orthographic", displayStyle: "realistic" }],
     ["create_3d_view", { name: "Вид", kind: "isometric", displayStyle: "wireframe" }],
     ["create_3d_view", { name: "Вид", kind: "isometric" }],
@@ -203,6 +204,16 @@ describe("MCP tools", { timeout: 20_000 }, () => {
 
     assert.ok(!result.isError);
     assert.deepEqual(bridge.frames[0]?.params, { ids: ["1", "9007199254740993"] });
+  });
+
+  it("takes 1000 ids in get_elements, the most it allows", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { elements: [], notFound: [] }));
+    const ids = Array.from({ length: 1000 }, (_, index) => String(index + 1));
+
+    const result = await client.callTool({ name: "get_elements", arguments: { ids } });
+
+    assert.ok(!result.isError);
+    assert.deepEqual(bridge.frames[0]?.params, { ids });
   });
 
   it("passes the camera of create_3d_view unchanged and returns the honest result", async (t) => {

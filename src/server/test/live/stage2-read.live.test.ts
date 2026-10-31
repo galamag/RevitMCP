@@ -418,7 +418,11 @@ describe("stage 2 live checks: reading and snapshots", { timeout: 120_000 }, () 
         assert.ok(refused.message.includes(plan.id), refused.message);
       }
 
-      assert.equal((await refusal(client, "get_view_snapshot", { viewId: "abc" })).code, INVALID_PARAMS);
+      for (const viewId of ["abc", "12x"]) {
+        const refused = await refusal(client, "get_view_snapshot", { viewId });
+        assert.equal(refused.code, INVALID_PARAMS);
+        assert.ok(refused.message.includes(plan.id), refused.message);
+      }
       for (const widthPx of [99, 4097, 1600.5, "1600"]) {
         assert.equal((await refusal(client, "get_view_snapshot", { viewId: plan.id, widthPx })).code, INVALID_PARAMS);
       }

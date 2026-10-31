@@ -13,7 +13,10 @@ internal static class ProjectSupport
     /// <summary>Gives a <see cref="DialogRecord"/> the camelCase keys of the contract.</summary>
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
 
-    /// <summary>Reads the required <c>name</c> parameter, without judging it: <see cref="TestFolder.Resolve"/> does.</summary>
+    /// <summary>
+    /// Reads the required <c>name</c> parameter, without judging it. The caller judges it: the project commands pass it to
+    /// <see cref="TestFolder.Resolve"/>, and <c>create_3d_view</c> checks it as a view name.
+    /// </summary>
     public static string ReadName(JsonElement parameters, string method) =>
         parameters.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String
             ? name.GetString()!
