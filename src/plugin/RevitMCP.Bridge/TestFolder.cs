@@ -11,6 +11,12 @@ public static partial class TestFolder
 {
     private const string Extension = ".rvt";
 
+    /// <summary>
+    /// Measured in live Revit: <c>SaveAs</c> takes 259 characters, but <c>Save</c> needs a backup path, five longer
+    /// (<c>.0001</c>), to fit too. Without it Save fails, so a project that cannot be saved later is refused now.
+    /// </summary>
+    private const int MaxPathLength = 254;
+
     private static readonly char[] ForbiddenCharacters = Path.GetInvalidFileNameChars();
 
     /// <summary>The full path of the folder, with no trailing separator.</summary>
@@ -28,15 +34,14 @@ public static partial class TestFolder
     public static string Resolve(string name)
     {
         var stem = name?.EndsWith(Extension, StringComparison.OrdinalIgnoreCase) == true ? name[..^Extension.Length] : name;
+        var path = Path.Combine(Root, stem + Extension);
 
-        var problem = FindProblem(stem);
-        if (problem is null && stem!.Contains('.'))
-        {
-            problem = $"apart from an optional {Extension} ending it may hold no dot";
-        }
+        var problem = FindProblem(stem)
+            ?? (stem!.Contains('.') ? $"apart from an optional {Extension} ending it may hold no dot" : null)
+            ?? (path.Length > MaxPathLength ? $"it is too long, as Revit can only keep paths of up to {MaxPathLength} characters here" : null);
 
         return problem is null
-            ? Path.Combine(Root, stem + Extension)
+            ? path
             : throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"'{name}' cannot be a project name: {problem}.");
     }
 

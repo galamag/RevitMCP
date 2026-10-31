@@ -4,7 +4,13 @@ namespace RevitMCP.Bridge.Tests;
 
 public class TestFolderTests
 {
+    /// <summary>Measured in live Revit: at 255 characters Save fails, because the backup path reaches 260.</summary>
+    private const int LongestPath = 254;
+
     private static string OtherDrive => (TestFolder.Root[0] == 'Z' ? "Y" : "Z") + TestFolder.Root[1..];
+
+    private static string NameOfPathLength(int length) =>
+        new('я', length - TestFolder.Root.Length - @"\.rvt".Length);
 
     private static void AssertRefused(string name)
     {
@@ -116,6 +122,21 @@ public class TestFolderTests
     [InlineData("a\0b")]
     [InlineData("a\nb")]
     public void Rejects_CharactersWindowsForbids(string name) => AssertRefused(name);
+
+    [Fact]
+    public void Accepts_LongestNameRevitCanStillBackUp()
+    {
+        var path = TestFolder.Resolve(NameOfPathLength(LongestPath));
+
+        Assert.Equal(LongestPath, path.Length);
+    }
+
+    [Fact]
+    public void Rejects_NameTooLongForRevitToBackUp()
+    {
+        AssertRefused(NameOfPathLength(LongestPath + 1));
+        AssertRefused(new string('я', 1000));
+    }
 
     [Fact]
     public void Refusal_NamesTheInput()
