@@ -563,6 +563,8 @@ describe("stage 2 live checks: delete and undo", { timeout: 120_000 }, () => {
       });
     });
 
+    // The park was not reproduced in task 13: in every run Revit ran the posted Undo within about 30 ms, so by the
+    // confirmation it had already happened. This test keeps the path open, but only the earlier probe proves the flush.
     it(`a posted undo left alone for ${pauseMs / 1000} s is confirmed by the request that follows it`, async () => {
       await withClient(async (client) => {
         const walls = await createWalls(client, 1);

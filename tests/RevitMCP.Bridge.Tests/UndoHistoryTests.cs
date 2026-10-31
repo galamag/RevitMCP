@@ -53,6 +53,46 @@ public class UndoHistoryTests
 
         Assert.Equal(UndoVerdict.NotOurs, decision.Verdict);
         Assert.Equal(Theirs, decision.Step!.Name);
+        Assert.Equal(Ours, decision.Ours!.Name);
+        Assert.Equal(1, decision.StepsAbove);
+    }
+
+    [Fact]
+    public void Decide_CountsEveryUserChangeAboveOurStep()
+    {
+        Commit(Active, Ours);
+        Commit(Active, Theirs);
+        Commit(Active, "Door");
+
+        var decision = _history.Decide(Active);
+
+        Assert.Equal(UndoVerdict.NotOurs, decision.Verdict);
+        Assert.Equal("Door", decision.Step!.Name);
+        Assert.Equal(2, decision.StepsAbove);
+    }
+
+    /// <summary>The user must not be sent to undo their work when an unknown step would stop undo right below it.</summary>
+    [Fact]
+    public void Decide_SaysLostWhenAnUnknownStepLiesBetweenTheUserChangeAndOurStep()
+    {
+        Commit(Active, Ours);
+        _history.Committed(Active, "Дом", [], [], []);
+        Commit(Active, Theirs);
+
+        var decision = _history.Decide(Active);
+
+        Assert.Equal(UndoVerdict.HistoryLost, decision.Verdict);
+        Assert.Equal(Theirs, decision.Step!.Name);
+    }
+
+    [Fact]
+    public void Decide_SendsTheUserToUndoWhenOursLiesAboveTheUnknownStep()
+    {
+        _history.Committed(Active, "Дом", [], [], []);
+        Commit(Active, Ours);
+        Commit(Active, Theirs);
+
+        Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
     }
 
     [Fact]
@@ -60,7 +100,10 @@ public class UndoHistoryTests
     {
         Commit(Active, Theirs);
 
-        Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
+        var decision = _history.Decide(Active);
+
+        Assert.Equal(UndoVerdict.NothingOfOurs, decision.Verdict);
+        Assert.Equal(Theirs, decision.Step!.Name);
     }
 
     [Fact]
@@ -80,7 +123,7 @@ public class UndoHistoryTests
         Commit(Active, "MCP without the colon");
         Commit(Active, "mcp: lower case");
 
-        Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
+        Assert.Equal(UndoVerdict.NothingOfOurs, _history.Decide(Active).Verdict);
     }
 
     [Fact]
@@ -152,12 +195,13 @@ public class UndoHistoryTests
     {
         Commit(Active, Ours, ["10"], ["5"]);
         var attempt = Post();
-        Assert.False(attempt.Undone);
+        Assert.Equal(UndoOutcome.Waiting, attempt.Outcome);
 
         _history.Undone(Active, "Дом", [Ours]);
 
         var last = _history.LastAttempt!;
-        Assert.True(last.Undone);
+        Assert.Equal(UndoOutcome.Undone, last.Outcome);
+        Assert.Null(last.Other);
         Assert.Equal(attempt.Id, last.Id);
         Assert.Equal(Ours, last.Step.Name);
         Assert.Equal(["10"], last.Step.CreatedIds);
@@ -165,28 +209,104 @@ public class UndoHistoryTests
     }
 
     [Fact]
-    public void Undone_InAnotherDocumentDoesNotConfirm()
+    public void Undone_InAnotherDocument_IsRecordedAsWhatHappened()
     {
         Commit(Active, Ours);
         Commit(Other, "MCP: other");
         _history.Undone(Other, "Другой", ["MCP: other"]);
         Post();
 
-        Commit(Other, "MCP: other");
+        Commit(Other, "MCP: other", ["20"]);
         _history.Undone(Other, "Другой", ["MCP: other"]);
 
-        Assert.False(_history.LastAttempt!.Undone);
+        var attempt = _history.LastAttempt!;
+        Assert.Equal(UndoOutcome.Other, attempt.Outcome);
+        Assert.Equal("MCP: other", attempt.Other!.Name);
+        Assert.Equal("Другой", attempt.Other.DocumentTitle);
+        Assert.Equal(["20"], attempt.Other.CreatedIds);
+        Assert.Equal(Ours, attempt.Step.Name);
     }
 
     [Fact]
-    public void Undone_OfAnotherStepDoesNotConfirm()
+    public void Undone_WithANameThatDoesNotFit_IsRecordedAsWhatHappened()
     {
         Commit(Active, Ours);
         Post();
 
         _history.Undone(Active, "Дом", ["Что-то другое"]);
 
-        Assert.False(_history.LastAttempt!.Undone);
+        var attempt = _history.LastAttempt!;
+        Assert.Equal(UndoOutcome.Other, attempt.Outcome);
+        Assert.Equal("Что-то другое", attempt.Other!.Name);
+        Assert.Equal("Дом", attempt.Other.DocumentTitle);
+        Assert.Empty(attempt.Other.CreatedIds);
+    }
+
+    /// <summary>The name fits, so the history stays in step, but the step is not the one the attempt was posted for.</summary>
+    [Fact]
+    public void Undone_OfAStepWithTheSameName_IsNotTheAttemptsStep()
+    {
+        Commit(Active, Ours, ["10"]);
+        Post();
+        Commit(Active, Ours, ["20"]);
+
+        _history.Undone(Active, "Дом", [Ours]);
+
+        var attempt = _history.LastAttempt!;
+        Assert.Equal(UndoOutcome.Other, attempt.Outcome);
+        Assert.Equal(Ours, attempt.Other!.Name);
+        Assert.Equal(["20"], attempt.Other.CreatedIds);
+        Assert.Equal(["10"], attempt.Step.CreatedIds);
+    }
+
+    [Fact]
+    public void Undone_WithNoName_IsRecordedAsUnknownSteps()
+    {
+        Commit(Active, Ours);
+        Post();
+
+        _history.Undone(Active, "Дом", []);
+
+        Assert.Equal(UndoStep.UnknownName, _history.LastAttempt!.Other!.Name);
+    }
+
+    [Fact]
+    public void Decide_KeepsRefusingAfterAnotherUndo_UntilTheWindowEnds()
+    {
+        Commit(Active, Ours);
+        Post();
+        Commit(Active, "MCP: second");
+        _history.Undone(Active, "Дом", ["MCP: second"]);
+
+        Assert.Equal(UndoVerdict.Unconfirmed, _history.Decide(Active).Verdict);
+
+        _clock.Advance(UndoHistory.ConfirmWindow);
+        Assert.Equal(UndoVerdict.Allowed, _history.Decide(Active).Verdict);
+    }
+
+    [Fact]
+    public void Undone_AfterTheWindow_IsNoLongerTiedToTheAttempt()
+    {
+        Commit(Active, Ours);
+        Post();
+        Commit(Active, Theirs);
+        _clock.Advance(UndoHistory.ConfirmWindow);
+
+        _history.Undone(Active, "Дом", [Theirs]);
+
+        Assert.Equal(UndoOutcome.Waiting, _history.LastAttempt!.Outcome);
+    }
+
+    [Fact]
+    public void RolledBack_IsNoUndo_SoItLeavesTheAttemptWaiting()
+    {
+        Commit(Active, Ours);
+        Post();
+        Commit(Active, "Inner");
+
+        _history.RolledBack(Active, "Дом", ["Inner"]);
+
+        Assert.Equal(UndoOutcome.Waiting, _history.LastAttempt!.Outcome);
     }
 
     [Fact]
@@ -197,7 +317,7 @@ public class UndoHistoryTests
 
         _history.Undone(Active, "Дом", ["Что-то другое"]);
 
-        Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
+        Assert.Equal(UndoVerdict.HistoryLost, _history.Decide(Active).Verdict);
     }
 
     [Fact]
@@ -210,7 +330,7 @@ public class UndoHistoryTests
         Assert.Equal(UndoVerdict.Allowed, _history.Decide(Active).Verdict);
 
         _history.Undone(Active, "Дом", ["MCP: next"]);
-        Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
+        Assert.Equal(UndoVerdict.HistoryLost, _history.Decide(Active).Verdict);
     }
 
     /// <summary>Live Revit: a group of two commits comes as two events, and its undo as one, in the name of the group.</summary>
@@ -224,7 +344,7 @@ public class UndoHistoryTests
 
         _history.Undone(Active, "Дом", ["Group"]);
 
-        Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
+        Assert.Equal(UndoVerdict.HistoryLost, _history.Decide(Active).Verdict);
     }
 
     /// <summary>Live Revit: a rolled back group names its steps, the last one first.</summary>
@@ -235,7 +355,7 @@ public class UndoHistoryTests
         Commit(Active, "Inner 1");
         Commit(Active, "Inner 2");
 
-        _history.Undone(Active, "Дом", ["Inner 2", "Inner 1"]);
+        _history.RolledBack(Active, "Дом", ["Inner 2", "Inner 1"]);
 
         Assert.Equal(UndoVerdict.Allowed, _history.Decide(Active).Verdict);
     }
@@ -245,7 +365,7 @@ public class UndoHistoryTests
     {
         _history.Undone(Active, "Дом", [Ours]);
 
-        Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
+        Assert.Equal(UndoVerdict.HistoryLost, _history.Decide(Active).Verdict);
     }
 
     [Fact]
@@ -306,7 +426,7 @@ public class UndoHistoryTests
     {
         _history.Redone(Active, "Дом", [Theirs]);
 
-        Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
+        Assert.Equal(UndoVerdict.NothingOfOurs, _history.Decide(Active).Verdict);
     }
 
     [Fact]
@@ -322,27 +442,211 @@ public class UndoHistoryTests
         Assert.Empty(_history.Decide(Active).Step!.CreatedIds);
     }
 
+    /// <summary>If the names were one real step, a top reading as ours would take <c>Theirs</c> along with it.</summary>
     [Fact]
-    public void Committed_WithSeveralNames_MakesAStepOfEachAndTheLastCarriesTheIds()
+    public void Committed_WithSeveralNames_IsOneUnknownStep_AndKeepsNoIds()
     {
-        _history.Committed(Active, "Дом", [Theirs, Ours], ["10"], []);
+        _history.Committed(Active, "Дом", [Theirs, Ours], ["10"], ["5"]);
 
-        var top = _history.Decide(Active).Step!;
-        Assert.Equal(Ours, top.Name);
-        Assert.Equal(["10"], top.CreatedIds);
+        var decision = _history.Decide(Active);
 
-        _history.Undone(Active, "Дом", [Ours]);
-        Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
+        Assert.Equal(UndoVerdict.HistoryLost, decision.Verdict);
+        Assert.Equal(UndoStep.UnknownName, decision.Step!.Name);
+        Assert.Empty(decision.Step.CreatedIds);
+        Assert.Empty(decision.Step.DeletedIds);
     }
 
     [Fact]
-    public void Committed_WithNoName_IsNotOurs()
+    public void Committed_WithNoName_IsAnUnknownStep()
     {
         Commit(Active, Ours);
 
         _history.Committed(Active, "Дом", [], [], []);
 
+        Assert.Equal(UndoVerdict.HistoryLost, _history.Decide(Active).Verdict);
+    }
+
+    [Fact]
+    public void Committed_KeepsIdsOnlyForOurSteps()
+    {
+        Commit(Active, Ours, ["10"], ["5"]);
+        var ours = _history.Decide(Active).Step!;
+
+        Commit(Active, Theirs, ["11"], ["6"]);
+        var theirs = _history.Decide(Active).Step!;
+
+        Assert.Equal(["10"], ours.CreatedIds);
+        Assert.Equal(["5"], ours.DeletedIds);
+        Assert.Empty(theirs.CreatedIds);
+        Assert.Empty(theirs.DeletedIds);
+    }
+
+    [Fact]
+    public void Depth_KeepsTheNewestSteps_AndWhatFellOffIsUnknown()
+    {
+        for (var step = 0; step < UndoHistory.MaxDepth + 5; step++)
+        {
+            Commit(Active, $"MCP: {step}");
+        }
+
+        // The bottom place holds the unknown step, so one step fewer than the depth can be undone.
+        for (var step = UndoHistory.MaxDepth + 4; step > 5; step--)
+        {
+            Assert.Equal($"MCP: {step}", _history.Decide(Active).Step!.Name);
+            _history.Undone(Active, "Дом", [$"MCP: {step}"]);
+        }
+
+        Assert.Equal(UndoVerdict.HistoryLost, _history.Decide(Active).Verdict);
+    }
+
+    [Fact]
+    public void Depth_HoldsAgainstRedo()
+    {
+        for (var step = 0; step < UndoHistory.MaxDepth + 1; step++)
+        {
+            _history.Redone(Active, "Дом", [Theirs]);
+        }
+
+        Assert.Equal(UndoVerdict.HistoryLost, _history.Decide(Active).Verdict);
+    }
+
+    [Fact]
+    public void Depth_LeavesAHistoryAtTheLimitAlone()
+    {
+        Commit(Active, Ours);
+        for (var step = 1; step < UndoHistory.MaxDepth; step++)
+        {
+            Commit(Active, Theirs);
+        }
+
         Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
+    }
+
+    [Fact]
+    public void Track_RecordsTheEventWhenItWorks()
+    {
+        _history.Track(() => Active, document => Commit(document, Ours));
+
+        Assert.Equal(UndoVerdict.Allowed, _history.Decide(Active).Verdict);
+    }
+
+    [Fact]
+    public void Track_AFailureRefusesThatDocument_EvenWithOursOnTop()
+    {
+        Commit(Active, Ours);
+
+        FailToRecord(Active);
+
+        var decision = _history.Decide(Active);
+        Assert.Equal(UndoVerdict.TrackingFailed, decision.Verdict);
+        Assert.Null(decision.Step);
+    }
+
+    [Fact]
+    public void Track_AFailureHolds_ThroughOurNextSteps_UntilTheDocumentResets()
+    {
+        FailToRecord(Active);
+
+        Commit(Active, Ours);
+        Assert.Equal(UndoVerdict.TrackingFailed, _history.Decide(Active).Verdict);
+
+        _history.Forget(Active);
+        Commit(Active, Ours);
+        Assert.Equal(UndoVerdict.Allowed, _history.Decide(Active).Verdict);
+    }
+
+    [Fact]
+    public void Track_AFailureLeavesOtherDocumentsAlone_AndItsStepsDoNotBlockThem()
+    {
+        Commit(Other, "MCP: earlier");
+        Commit(Active, "MCP: later");
+
+        FailToRecord(Active);
+
+        Assert.Equal(UndoVerdict.Allowed, _history.Decide(Other).Verdict);
+    }
+
+    [Fact]
+    public void Track_AFailureBeforeTheDocumentIsKnown_RefusesEveryDocument_EvenOnesNotSeenYet()
+    {
+        Commit(Active, Ours);
+        Commit(Other, Ours);
+
+        FailToRecord(null);
+
+        Assert.Equal(UndoVerdict.TrackingFailed, _history.Decide(Active).Verdict);
+        Assert.Equal(UndoVerdict.TrackingFailed, _history.Decide(Other).Verdict);
+        Assert.Equal(UndoVerdict.TrackingFailed, _history.Decide(3).Verdict);
+    }
+
+    [Fact]
+    public void Track_AFailureForEveryDocument_EndsForEachAsItResets()
+    {
+        Commit(Active, Ours);
+        Commit(Other, Ours);
+        FailToRecord(null);
+
+        _history.Forget(Other);
+        Commit(Other, Ours);
+
+        Assert.Equal(UndoVerdict.Allowed, _history.Decide(Other).Verdict);
+        Assert.Equal(UndoVerdict.TrackingFailed, _history.Decide(Active).Verdict);
+    }
+
+    [Fact]
+    public void Track_ASecondFailureForEveryDocument_CatchesThoseThatResetBefore()
+    {
+        FailToRecord(null);
+        _history.Forget(Other);
+
+        FailToRecord(null);
+
+        Assert.Equal(UndoVerdict.TrackingFailed, _history.Decide(Other).Verdict);
+    }
+
+    [Fact]
+    public void Track_AFailureWhileAnUndoWaits_MakesItsFateUnknown()
+    {
+        Commit(Active, Ours);
+        Post();
+
+        FailToRecord(Active);
+
+        Assert.Equal(UndoOutcome.Unknown, _history.LastAttempt!.Outcome);
+    }
+
+    [Fact]
+    public void Track_AFailureInAnotherDocument_LeavesAWaitingUndoWaiting()
+    {
+        Commit(Active, Ours);
+        Post();
+
+        FailToRecord(Other);
+
+        Assert.Equal(UndoOutcome.Waiting, _history.LastAttempt!.Outcome);
+    }
+
+    [Fact]
+    public void Track_AFailureBeforeTheDocumentIsKnown_MakesAWaitingUndoUnknown()
+    {
+        Commit(Active, Ours);
+        Post();
+
+        FailToRecord(null);
+
+        Assert.Equal(UndoOutcome.Unknown, _history.LastAttempt!.Outcome);
+    }
+
+    [Fact]
+    public void Track_AFailureLeavesASettledUndoAsItIs()
+    {
+        Commit(Active, Ours);
+        Post();
+        _history.Undone(Active, "Дом", [Ours]);
+
+        FailToRecord(Active);
+
+        Assert.Equal(UndoOutcome.Undone, _history.LastAttempt!.Outcome);
     }
 
     [Fact]
@@ -394,7 +698,7 @@ public class UndoHistoryTests
 
         _history.Undone(Active, "Дом", [Ours]);
 
-        Assert.True(_history.LastAttempt!.Undone);
+        Assert.Equal(UndoOutcome.Undone, _history.LastAttempt!.Outcome);
     }
 
     [Fact]
@@ -409,7 +713,7 @@ public class UndoHistoryTests
 
         Assert.NotEqual(first.Id, second.Id);
         Assert.Equal("MCP: first", _history.LastAttempt!.Step.Name);
-        Assert.False(_history.LastAttempt.Undone);
+        Assert.Equal(UndoOutcome.Waiting, _history.LastAttempt.Outcome);
     }
 
     [Fact]
@@ -428,6 +732,115 @@ public class UndoHistoryTests
         _history.Undone(Active, "Дом", [Ours]);
 
         Assert.Null(_history.LastAttempt);
+    }
+
+    [Fact]
+    public void Explain_SendsTheUserToUndoWhenOursLiesBelow_AndSaysWhatItCostsThem()
+    {
+        Commit(Active, Ours);
+        Commit(Active, Theirs);
+
+        var text = _history.Decide(Active).Explain("Дом");
+
+        Assert.Contains($"'{Theirs}'", text);
+        Assert.Contains($"the last operation of these tools, '{Ours}': 1.", text);
+        Assert.Contains("Only the user can undo those", text);
+        Assert.Contains("that loses them", text);
+        Assert.Contains("try again", text);
+    }
+
+    [Fact]
+    public void Explain_DoesNotSendTheUserToUndoWhenNothingOfOursLiesBelow()
+    {
+        Commit(Active, Theirs);
+
+        var text = _history.Decide(Active).Explain("Дом");
+
+        Assert.Contains("nothing to undo here", text);
+        Assert.Contains("Do not ask the user to undo that change", text);
+        Assert.DoesNotContain("try again", text);
+    }
+
+    [Fact]
+    public void Explain_ForALostHistory_SaysWhenUndoComesBack_AndDoesNotSendTheUserToUndo()
+    {
+        Commit(Active, Ours);
+        _history.Undone(Active, "Дом", ["Что-то другое"]);
+
+        var text = _history.Decide(Active).Explain("Дом");
+
+        Assert.Contains("the undo history of 'Дом' was lost", text);
+        Assert.Contains("until the next operation of these tools in this project", text);
+        Assert.Contains("Do not ask the user to undo anything for this", text);
+        Assert.DoesNotContain(UndoStep.UnknownName, text);
+        Assert.DoesNotContain("try again", text);
+    }
+
+    /// <summary>A user change above a lost history reads the same: undoing it would rebuild the same refusal.</summary>
+    [Fact]
+    public void Explain_ForAUserChangeAboveALostHistory_DoesNotSendTheUserToUndo()
+    {
+        Commit(Active, Ours);
+        _history.Undone(Active, "Дом", ["Что-то другое"]);
+        Commit(Active, Theirs);
+
+        var text = _history.Decide(Active).Explain("Дом");
+
+        Assert.Contains("was lost", text);
+        Assert.Contains("Do not ask the user to undo anything for this", text);
+    }
+
+    [Fact]
+    public void Explain_ForAFailedTracker_SaysItLastsUntilTheProjectReopens()
+    {
+        Commit(Active, Ours);
+        FailToRecord(Active);
+
+        var text = _history.Decide(Active).Explain("Дом");
+
+        Assert.Contains("recording the changes of 'Дом' failed", text);
+        Assert.Contains("until this project is closed and opened again", text);
+        Assert.Contains("Do not ask the user to undo anything for this", text);
+    }
+
+    [Fact]
+    public void Explain_ForAnotherDocument_NamesItAndTheWayThere()
+    {
+        Commit(Other, Ours);
+
+        var text = _history.Decide(Active).Explain("Дом");
+
+        Assert.Contains("'Другой'", text);
+        Assert.Contains("open_project", text);
+    }
+
+    [Fact]
+    public void Explain_ForAnUnsettledUndo_SaysToAskWhatBecameOfIt()
+    {
+        Commit(Active, Ours);
+        Post();
+
+        var text = _history.Decide(Active).Explain("Дом");
+
+        Assert.Contains("get_last_undo_result", text);
+        Assert.Contains("one minute", text);
+    }
+
+    [Fact]
+    public void Explain_ForAnEmptyHistory_SaysSo()
+    {
+        Assert.Contains("nothing to undo in 'Дом'", _history.Decide(Active).Explain("Дом"));
+    }
+
+    /// <summary>Runs an event that fails, with its document known unless <paramref name="document"/> is null.</summary>
+    private void FailToRecord(int? document)
+    {
+        var failure = new InvalidOperationException("The event could not be read.");
+
+        var thrown = Assert.Throws<InvalidOperationException>(() =>
+            _history.Track(() => document ?? throw failure, _ => throw failure));
+
+        Assert.Same(failure, thrown);
     }
 
     private void Commit(int document, string name, string[]? created = null, string[]? deleted = null) =>

@@ -14,6 +14,8 @@ public sealed class GetLastUndoResultCommand(UndoTracker tracker) : ICommand
     private const string None = "none";
     private const string Undone = "undone";
     private const string NotConfirmed = "not_confirmed";
+    private const string Other = "other";
+    private const string Unknown = "unknown";
 
     public string Method => MethodNames.GetLastUndoResult;
 
@@ -23,16 +25,30 @@ public sealed class GetLastUndoResultCommand(UndoTracker tracker) : ICommand
     {
         var attempt = tracker.History.LastAttempt;
 
+        // With another step gone, the ids of the one asked for still stand, and it is the ids of what went that matter.
+        var gone = attempt?.Other ?? attempt?.Step;
+
         return JsonSerializer.SerializeToElement(
             new
             {
-                state = attempt is null ? None : attempt.Undone ? Undone : NotConfirmed,
+                state = Describe(attempt),
                 undoId = attempt?.Id,
                 transactionName = attempt?.Step.Name,
-                createdIds = attempt?.Step.CreatedIds ?? [],
-                restoredIds = attempt?.Step.DeletedIds ?? [],
+                createdIds = gone?.CreatedIds ?? [],
+                restoredIds = gone?.DeletedIds ?? [],
                 documentTitle = attempt?.Step.DocumentTitle,
+                otherName = attempt?.Other?.Name,
+                otherDocumentTitle = attempt?.Other?.DocumentTitle,
             },
             ProjectSupport.Options);
     }
+
+    private static string Describe(UndoAttempt? attempt) => attempt?.Outcome switch
+    {
+        null => None,
+        UndoOutcome.Undone => Undone,
+        UndoOutcome.Other => Other,
+        UndoOutcome.Unknown => Unknown,
+        _ => NotConfirmed,
+    };
 }

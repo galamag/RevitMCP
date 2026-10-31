@@ -378,10 +378,26 @@ describe("MCP tools", { timeout: 20_000 }, () => {
 
     assert.match(description, /every id you still hold from it is invalid/);
     assert.match(description, /undo_refused/);
-    assert.match(description, /only the user can undo their own change/);
+    assert.match(description, /only the user can undo their own change, and it costs them that change/);
+    assert.match(description, /so ask them only when the refusal says an operation of these tools lies below it/);
+    assert.match(description, /asking the user to undo does not help/);
+    assert.match(description, /undid something else instead of what was asked/);
     assert.match(description, /open_project/);
     assert.match(description, /get_last_undo_result/);
     assert.match(description, /There is no redo tool/);
+  });
+
+  it("tells the model the truth about get_last_undo_result", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "get_last_undo_result")?.description ?? "";
+
+    assert.match(description, /An empty createdIds does not prove that nothing was created/);
+    for (const state of ["undone", "not_confirmed", "other", "unknown", "none"]) {
+      assert.ok(description.includes(state), `should explain ${state}`);
+    }
+    assert.match(description, /otherName and otherDocumentTitle say what/);
   });
 
   it("takes 500 items in a create_ tool, the most it allows", async (t) => {

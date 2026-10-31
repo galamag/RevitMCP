@@ -18,6 +18,9 @@ export const PROTOCOL_VERSION = 1;
 /** How long a call waits for Revit before it cancels the request. */
 export const DEFAULT_TIMEOUT_MS = 60_000;
 
+/** What a tool needs of the client to make its own calls. */
+export type BridgeCaller = Pick<BridgeClient, "call">;
+
 export interface CallOptions {
   /** Milliseconds to wait for the answer. Defaults to {@link DEFAULT_TIMEOUT_MS}. */
   timeoutMs?: number;

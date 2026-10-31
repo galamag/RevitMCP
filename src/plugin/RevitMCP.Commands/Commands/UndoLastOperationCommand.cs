@@ -26,7 +26,7 @@ public sealed class UndoLastOperationCommand(UndoTracker tracker) : ICommand
         var decision = tracker.History.Decide(UndoTracker.KeyOf(active));
         if (decision is not { Verdict: UndoVerdict.Allowed, Step: { } step })
         {
-            throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"{Refused}: {Explain(decision, active.Title)}");
+            throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"{Refused}: {decision.Explain(active.Title)}");
         }
 
         var undo = RevitCommandId.LookupPostableCommandId(PostableCommand.Undo)
@@ -47,18 +47,4 @@ public sealed class UndoLastOperationCommand(UndoTracker tracker) : ICommand
             },
             ProjectSupport.Options);
     }
-
-    private static string Explain(UndoDecision decision, string activeTitle) => decision switch
-    {
-        { Verdict: UndoVerdict.Unconfirmed, Step: { } step } =>
-            $"an earlier undo of '{step.Name}' in '{step.DocumentTitle}' is still unconfirmed, and two must not overlap. Nothing was undone by this call. "
-            + "Ask get_last_undo_result what became of it. If it stays not_confirmed, undo is possible again one minute after that undo was posted.",
-        { Verdict: UndoVerdict.OtherDocument, Step: { } step } =>
-            $"the last operation of these tools, '{step.Name}', lies in '{step.DocumentTitle}', and the active project is '{activeTitle}'. Undo acts on the active project only. "
-            + "Nothing was undone. Use open_project to make that project active first.",
-        { Verdict: UndoVerdict.NotOurs, Step: { } step } =>
-            $"the last change in '{step.DocumentTitle}' is '{step.Name}', which did not come from these tools, and Undo would take that. Nothing was undone. "
-            + "Only the user can undo that, in Revit, so ask them to and then try again.",
-        _ => $"there is nothing to undo in '{activeTitle}': no operation of these tools is in its history. A project opened or created in this Revit session starts with an empty history.",
-    };
 }

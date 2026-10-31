@@ -98,13 +98,63 @@ describe("undo_last_operation", { timeout: 20_000 }, () => {
     assert.match(textOf(result), /treat the model as unchanged/);
   });
 
-  it("never claims success for a state it does not know", async (t) => {
-    const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, { ...undone, state: "none" })));
+  it("never claims success after a plugin restart, and says that is what happened", async (t) => {
+    const nothing = { state: "none", undoId: null, transactionName: null, createdIds: [], restoredIds: [], documentTitle: null, otherName: null, otherDocumentTitle: null };
+    const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, nothing)));
 
     const result = await undo(client);
 
     assert.equal(result.isError, true);
-    assert.match(textOf(result), /^Not undone: /);
+    assert.match(textOf(result), /the plugin now knows of no undo at all/);
+    assert.match(textOf(result), /restarted/);
+    assert.match(textOf(result), /not known whether it happened/);
+    assert.doesNotMatch(textOf(result), /about another undo/);
+  });
+
+  it("says what Revit undid when it took something else", async (t) => {
+    const other = { ...undone, state: "other", otherName: "Wall", otherDocumentTitle: "Другой", createdIds: [], restoredIds: [] };
+    const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, other)));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /^Revit undid 'Wall' in 'Другой' instead of 'MCP: create_walls'/);
+    assert.match(textOf(result), /the model did change/);
+    assert.doesNotMatch(textOf(result), /Not undone/);
+    assert.doesNotMatch(textOf(result), /treat the model as unchanged/);
+    assert.doesNotMatch(textOf(result), /are gone|are back/);
+  });
+
+  it("names the ids of what Revit undid instead, when it knows them", async (t) => {
+    const other = { ...undone, state: "other", otherName: "MCP: create_walls", otherDocumentTitle: "Дом", createdIds: ["20"], restoredIds: ["5"] };
+    const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, other)));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /are gone: 20\./);
+    assert.match(textOf(result), /are back: 5\./);
+  });
+
+  it("calls the state unknown when a change could not be recorded while the undo waited", async (t) => {
+    const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, { ...undone, state: "unknown" })));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /a change could not be recorded/);
+    assert.match(textOf(result), /not known whether it happened/);
+    assert.doesNotMatch(textOf(result), /Not undone/);
+  });
+
+  it("never claims anything for a state it has not heard of", async (t) => {
+    const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, { ...undone, state: "пропало" })));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /not known whether it happened/);
+    assert.doesNotMatch(textOf(result), /Not undone/);
   });
 
   it("calls the state unknown when the confirmation was cancelled in the queue", async (t) => {
@@ -124,6 +174,7 @@ describe("undo_last_operation", { timeout: 20_000 }, () => {
     assert.match(textOf(result), /not known whether it happened/);
     assert.match(textOf(result), /get_last_undo_result/);
     assert.match(textOf(result), /Do not call undo_last_operation again/);
+    assert.match(textOf(result), /ask the user to look at Revit/);
     assertNoClaim(textOf(result));
   });
 
@@ -143,6 +194,7 @@ describe("undo_last_operation", { timeout: 20_000 }, () => {
     assert.equal(result.isError, true);
     assert.match(textOf(result), /not known whether it happened/);
     assert.match(textOf(result), /get_last_undo_result/);
+    assert.match(textOf(result), /ask the user to look at Revit/);
     assertNoClaim(textOf(result));
   });
 
@@ -153,6 +205,7 @@ describe("undo_last_operation", { timeout: 20_000 }, () => {
 
     assert.equal(result.isError, true);
     assert.match(textOf(result), /not known whether it happened/);
+    assert.match(textOf(result), /ask the user to look at Revit/);
     assertNoClaim(textOf(result));
   });
 
@@ -221,6 +274,7 @@ describe("undo_last_operation", { timeout: 20_000 }, () => {
 
     assert.equal(result.isError, true);
     assert.match(textOf(result), /not known whether it was posted/);
+    assert.match(textOf(result), /it describes an older one/);
     assert.equal(bridge.frames.length, 1);
   });
 
@@ -258,6 +312,8 @@ describe("undo_last_operation", { timeout: 20_000 }, () => {
     assert.equal(result.isError, true);
     assert.match(textOf(result), /not known whether the undo was posted/);
     assert.match(textOf(result), /Do not call undo_last_operation again/);
+    assert.match(textOf(result), /First see whether it was posted at all/);
+    assert.match(textOf(result), /it describes an older one/);
   });
 
   it("throws a refusal as the plugin error, and an unconfirmed undo as its own error", async (t) => {

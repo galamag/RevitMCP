@@ -8,7 +8,8 @@ namespace RevitMCP.Commands;
 /// Feeds <see cref="UndoHistory"/> from the document events, for the length of the Revit session. A document is known
 /// by <see cref="Document.GetHashCode"/>: the API promises it is the same for every instance of a document open in the
 /// session and differs when the file is opened again, so a reopened document cannot inherit a history, while titles
-/// repeat. No exception leaves a handler, because they run inside Revit. All of it runs on the main thread.
+/// repeat. No exception leaves a handler, because they run inside Revit. An event that could not be recorded makes undo
+/// refuse instead, see <see cref="UndoHistory.Track"/>. All of it runs on the main thread.
 /// </summary>
 public sealed class UndoTracker
 {
@@ -45,32 +46,37 @@ public sealed class UndoTracker
     private static List<string> Texts(ICollection<ElementId> ids) => ids.Select(id => id.ToString()).ToList();
 
     private void OnDocumentChanged(object? sender, DocumentChangedEventArgs e) => Guarded(nameof(OnDocumentChanged), () =>
+        History.Track(() => KeyOf(e.GetDocument()), key => Record(e, key)));
+
+    private void Record(DocumentChangedEventArgs e, int key)
     {
-        var document = e.GetDocument();
-        var key = KeyOf(document);
+        var title = e.GetDocument().Title;
         var names = e.GetTransactionNames().ToList();
 
         switch (e.Operation)
         {
             case UndoOperation.TransactionCommitted:
-                History.Committed(key, document.Title, names, Texts(e.GetAddedElementIds()), Texts(e.GetDeletedElementIds()));
+                History.Committed(key, title, names, Texts(e.GetAddedElementIds()), Texts(e.GetDeletedElementIds()));
+                break;
+
+            case UndoOperation.TransactionUndone:
+                History.Undone(key, title, names);
                 break;
 
             // What a rolled back group held was committed step by step, so it leaves the history the same way.
-            case UndoOperation.TransactionUndone:
             case UndoOperation.TransactionGroupRolledBack:
-                History.Undone(key, document.Title, names);
+                History.RolledBack(key, title, names);
                 break;
 
             case UndoOperation.TransactionRedone:
-                History.Redone(key, document.Title, names);
+                History.Redone(key, title, names);
                 break;
 
             // A rolled back transaction never reached the history. Live Revit raises this event for one, as for a dry run.
             default:
                 break;
         }
-    });
+    }
 
     private void OnDocumentCreated(object? sender, DocumentCreatedEventArgs e) => Guarded(nameof(OnDocumentCreated), () => Reset(e.Document));
 

@@ -1,8 +1,8 @@
 import { z } from "zod";
 
+import type { BridgeCaller } from "./client.ts";
 import { presentSnapshot } from "./snapshot.ts";
 import { undoLastOperation } from "./undo.ts";
-import type { UndoClient } from "./undo.ts";
 
 /** One part of a tool result, as MCP defines it. */
 export type ToolContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
@@ -19,7 +19,7 @@ export interface ToolDefinition {
   /** Turns the plugin's answer into the tool result. When unset, the answer is returned as JSON text. */
   readonly present?: (answer: unknown) => Promise<ToolContent[]>;
   /** Replaces the forwarding, for a tool that takes more than one request. It gets `timeoutMs` for each of them. */
-  readonly run?: (client: UndoClient, timeoutMs: number | undefined) => Promise<unknown>;
+  readonly run?: (client: BridgeCaller, timeoutMs: number | undefined) => Promise<unknown>;
 }
 
 /** The plugin answers these on its socket thread, so they come back at once even while Revit is busy. */
@@ -433,8 +433,11 @@ export const tools: readonly ToolDefinition[] = [
       "It needs no arguments and answers only after Revit confirmed it. Returns { state, undoId, transactionName, createdIds, restoredIds, documentTitle }. state is undone. transactionName names what came off, as MCP: and the tool name. " +
       "createdIds lists the elements that operation created: they no longer exist, so every id you still hold from it is invalid, and using one fails. An element it changed goes back to how it was, and its id stays. restoredIds lists what that operation had deleted, back in the model under the same ids. " +
       "It refuses, and nothing changes, when the error text starts with undo_refused: when nothing of these tools is in the history of the active project, which is always so right after create_project or open_project opened it, as Revit keeps no history in the file; " +
-      "when the last change in the project came from somewhere else, such as the user in Revit, because Undo would take that instead: only the user can undo their own change; " +
-      "when the last operation of these tools lies in another project: make that one active with open_project first; and when an earlier undo is still unconfirmed. " +
+      "when the last change in the project came from somewhere else, such as the user in Revit, because Undo would take that instead. Then read the refusal: only the user can undo their own change, and it costs them that change, " +
+      "so ask them only when the refusal says an operation of these tools lies below it; " +
+      "when the undo history of the project was lost, or recording its changes failed: the refusal says for how long, and asking the user to undo does not help; " +
+      "when the last operation of these tools lies in another project: make that one active with open_project first; and when an earlier undo is not settled. " +
+      "A failed call can also say that Revit undid something else instead of what was asked: that step is gone, so read the model again before you go on. " +
       "When the text of a failed call says the undo was posted and not confirmed, or that this is not known, do not call this again blindly, as it would take the next operation: " +
       "ask get_last_undo_result first. After an undo the project may read as saved or as changed, whichever is true: see isModified in get_model_info. There is no redo tool. " +
       "Related tools: get_last_undo_result, delete_elements, get_model_info.",
@@ -445,8 +448,12 @@ export const tools: readonly ToolDefinition[] = [
     name: "get_last_undo_result",
     description:
       "Says what became of the last undo posted in this Revit session, without undoing anything. undo_last_operation already asks this itself, so call it only after that tool reported no confirmation, such as after a timeout. " +
-      "Returns { state, undoId, transactionName, createdIds, restoredIds, documentTitle }. state undone means Revit reported that undo, and the other keys mean what they mean there. " +
-      "not_confirmed means it was posted and Revit reported nothing, so treat the model as unchanged, and it is possible that Revit dropped the command. none means no undo was posted since Revit started, and the other keys are then empty. " +
+      "Returns { state, undoId, transactionName, createdIds, restoredIds, documentTitle, otherName, otherDocumentTitle }. state undone means Revit reported that undo, and the other keys mean what they mean there. " +
+      "An empty createdIds does not prove that nothing was created: a step Revit redid after this plugin lost track of it is known by name only, so read the model when it matters. " +
+      "not_confirmed means it was posted and Revit reported nothing, so treat the model as unchanged, and it is possible that Revit dropped the command. " +
+      "other means that while it waited Revit undid something else: otherName and otherDocumentTitle say what, createdIds and restoredIds are about that if known, and transactionName, what was asked for, is still in the model. " +
+      "unknown means that a change could not be recorded while it waited, so it may have happened: read the model. " +
+      "none means no undo was posted since Revit or the plugin last started, and the other keys are then empty. " +
       "An undo is reported as what it was asked to take. A change that a person undid in Revit is not an undo of these tools, so it does not show here. " +
       "It waits for Revit like any model request, and it also lets a command Revit is holding go first. Related tools: undo_last_operation, get_model_info.",
     inputSchema: {},
