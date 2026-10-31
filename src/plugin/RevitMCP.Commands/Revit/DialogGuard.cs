@@ -23,7 +23,6 @@ public sealed class DialogGuard
         TaskDialogResult.Cancel,
         TaskDialogResult.No,
         TaskDialogResult.Ok,
-        TaskDialogResult.Close,
     ];
 
     private readonly List<DialogRecord> _recorded = [];

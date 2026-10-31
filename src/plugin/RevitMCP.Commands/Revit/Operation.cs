@@ -37,7 +37,10 @@ internal sealed class OperationAbortedException(string reason) : Exception(reaso
 
 /// <summary>
 /// Runs one model change as one transaction, named <c>MCP: name</c>, so that it is one Undo step. Every way a body can
-/// fail ends in the outcome, and the transaction is never left open.
+/// fail ends in the outcome, and the transaction is closed, except in <see cref="TransactionStatus.Pending"/>, where
+/// Revit refuses a rollback. The outcome then reports it, but a person can still commit it.
+/// Check the input before calling this: an exception from a body, even a RequestFailedException, becomes text in
+/// <see cref="OperationOutcome.Errors"/> and loses its error code. Callers must read <see cref="OperationOutcome.Committed"/>.
 /// </summary>
 public static class Operation
 {
