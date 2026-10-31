@@ -12,8 +12,8 @@ namespace RevitMCP.Commands;
 /// </summary>
 internal static class ElementIds
 {
-    /// <summary>The most IDs one call takes, which <c>registry.ts</c> states too.</summary>
-    private const int MaxListed = 1000;
+    /// <summary>The most IDs one call takes and the most elements <c>get_elements</c> lists by category, which <c>registry.ts</c> states too.</summary>
+    public const int MaxListed = 1000;
 
     public static bool TryParse(string text, [NotNullWhen(true)] out ElementId? id) =>
         ElementId.TryParse(text, out id) && id.ToString() == text;

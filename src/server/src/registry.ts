@@ -30,6 +30,9 @@ const MIN_SNAPSHOT_WIDTH_PX = 100;
 const MAX_SNAPSHOT_WIDTH_PX = 4096;
 const MAX_ELEMENT_IDS = 1000;
 
+/** The category words of list_types and get_elements, the same as `CategoryMap` in the plugin. */
+const ELEMENT_CATEGORIES = ["walls", "floors", "roofs", "ceilings", "doors", "windows", "furniture", "plumbing", "stairs", "railings"] as const;
+
 /** The limits of the sun, which the plugin checks too. */
 const MAX_SUN_AZIMUTH_DEG = 360;
 const MAX_SUN_ALTITUDE_DEG = 90;
@@ -182,17 +185,35 @@ export const tools: readonly ToolDefinition[] = [
       "Related tools: get_elements, get_model_info, create_3d_view.",
     inputSchema: {
       category: z
-        .enum(["walls", "floors", "roofs", "ceilings", "doors", "windows", "furniture", "plumbing", "stairs", "railings", "view_templates"])
+        .enum([...ELEMENT_CATEGORIES, "view_templates"])
         .describe("The category to list. These words stay the same whatever the language of Revit."),
     },
   },
   {
+    name: "list_materials",
+    description:
+      "Lists the materials the active project holds, without changing anything. Use it to see which materials exist and what colour they have, because the names are not known in advance. " +
+      "Returns [{ id, name, materialClass, color, transparency }] sorted by name, then id, so the order holds between calls. id is a string: pass it back unchanged. " +
+      "name and materialClass are Revit's own text, usually Russian: read them to choose a material, and never guess or translate one. " +
+      "color is { r, g, b }, each from 0 to 255, the colour Revit reports for the Shading display style, or null when the material has no valid colour. " +
+      "The Realistic display style draws the appearance of the material instead, and this list does not describe that. " +
+      "transparency is a whole number from 0, opaque, to 100, fully transparent. An empty list means the project holds no material. " +
+      "Related tools: list_types, get_elements, get_model_info.",
+    inputSchema: {},
+  },
+  {
     name: "get_elements",
     description:
-      "Reads elements of the active project by id, without changing anything. Returns { elements, notFound }. " +
-      "elements is [{ id, category, typeName, levelId, boundingBoxMm, topMm? }] in the order asked, each id once. notFound " +
+      "Reads elements of the active project, either by id or by category, without changing anything. Give exactly one of ids and category, and a call with both or with neither is refused. " +
+      "Returns { elements, notFound, truncated }. " +
+      "elements is [{ id, category, typeName, levelId, boundingBoxMm, topMm? }]. With ids it comes in the order asked, each id once, and notFound " +
       "lists the ids that match no element, so an id that is gone does not fail the others. Text that cannot be an " +
-      "element id refuses the whole call, and so do more than 1000 ids. category is a list_types word such as walls where one exists, otherwise " +
+      "element id refuses the whole call, and so do more than 1000 ids. truncated is false with ids. " +
+      "With category, a list_types word such as walls, it lists the elements of that category that the model holds, not their types, ordered by id. " +
+      "It returns at most 1000, and truncated is true when more matched, so narrow the call with levelId. levelId is the id of a level from get_model_info, " +
+      "and only with category: it keeps the elements whose own levelId is that level, so one that is tied to no level is left out. " +
+      "A levelId that is no level is refused, and the refusal lists the levels. notFound is always empty with category. " +
+      "category in each element is a list_types word such as walls where one exists, otherwise " +
       "a stable English BuiltInCategory name such as OST_Levels, and null for an element without a category or in a " +
       "custom one: it does not change with the language of Revit. typeName is the name of the element's type, " +
       "usually Russian, and null when it has none. levelId is a string, and null when the element is not tied to a " +
@@ -201,8 +222,23 @@ export const tools: readonly ToolDefinition[] = [
       "Revit knows no box, as for a type. A wall also has topMm, in millimetres in model coordinates: its real top, read from its shape. " +
       "A wall's box can keep an old height after the wall is cut by a roof, so read topMm for a wall and not boundingBoxMm. Other categories have no topMm. Related tools: list_types, get_model_info.",
     inputSchema: {
-      ids: z.array(z.string().min(1)).min(1).max(MAX_ELEMENT_IDS).describe("Element ids as strings, passed on unchanged from other tools."),
+      ids: z.array(z.string().min(1)).min(1).max(MAX_ELEMENT_IDS).optional().describe("Element ids as strings, passed on unchanged from other tools. Give this or category, not both."),
+      category: z.enum(ELEMENT_CATEGORIES).optional().describe("The category whose elements to list. Give this or ids, not both. These words stay the same whatever the language of Revit."),
+      levelId: elementId("The id of the level whose elements to keep. Only with category").optional(),
     },
+  },
+  {
+    name: "get_warnings",
+    description:
+      "Lists the warnings Revit holds for the active project, the same list as Review Warnings in Revit, without changing anything. " +
+      "Use it after building to find what Revit complains about, such as walls that overlap, and again after a fix to see that the warning is gone. " +
+      "Returns [{ definitionId, text, elementIds, additionalElementIds }], in the order Revit gives them. " +
+      "definitionId is the id of the kind of warning, a GUID that does not change with the language of Revit, so match on it and not on text. " +
+      "text is Revit's own words in the language of Revit. elementIds lists the elements that cause the warning and additionalElementIds the ones only related to it, " +
+      "both as strings passed back unchanged and sorted, for get_elements. An empty list means that Revit holds no warning. " +
+      "The create_ tools also report warnings, but only for their own call and only as text. This tool lists what is still in the model, " +
+      "so a warning that Revit resolved when a transaction ended is not in it. Related tools: get_elements, delete_elements, get_model_info.",
+    inputSchema: {},
   },
   {
     name: "create_3d_view",

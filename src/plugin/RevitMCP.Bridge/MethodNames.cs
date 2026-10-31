@@ -11,7 +11,9 @@ public static class MethodNames
     public const string OpenProject = "open_project";
     public const string SaveProject = "save_project";
     public const string ListTypes = "list_types";
+    public const string ListMaterials = "list_materials";
     public const string GetElements = "get_elements";
+    public const string GetWarnings = "get_warnings";
     public const string Create3dView = "create_3d_view";
     public const string GetViewSnapshot = "get_view_snapshot";
     public const string CreateLevels = "create_levels";
@@ -34,7 +36,9 @@ public static class MethodNames
         OpenProject,
         SaveProject,
         ListTypes,
+        ListMaterials,
         GetElements,
+        GetWarnings,
         Create3dView,
         GetViewSnapshot,
         CreateLevels,

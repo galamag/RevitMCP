@@ -77,6 +77,8 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "get_request_status",
         "get_status",
         "get_view_snapshot",
+        "get_warnings",
+        "list_materials",
         "list_types",
         "open_project",
         "save_project",
@@ -188,6 +190,12 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["get_elements", { ids: [] }],
     ["get_elements", { ids: [123] }],
     ["get_elements", { ids: Array.from({ length: 1001 }, (_, index) => String(index + 1)) }],
+    ["get_elements", { category: "стены" }],
+    ["get_elements", { category: "view_templates" }],
+    ["get_elements", { category: 5 }],
+    ["get_elements", { category: "walls", levelId: 5 }],
+    ["get_elements", { category: "walls", levelId: "" }],
+    ["get_elements", { ids: "1" }],
     ["create_3d_view", { name: "Вид", kind: "orthographic", displayStyle: "realistic" }],
     ["create_3d_view", { name: "Вид", kind: "isometric", displayStyle: "wireframe" }],
     ["create_3d_view", { name: "Вид", kind: "isometric" }],
@@ -466,6 +474,69 @@ describe("MCP tools", { timeout: 20_000 }, () => {
 
     assert.ok(!result.isError);
     assert.deepEqual(bridge.frames[0]?.params, { ids: ["1", "9007199254740993"] });
+  });
+
+  it("passes a category and a level of get_elements, and returns the answer unchanged", async (t) => {
+    const answer = { elements: [{ id: "10", category: "walls", typeName: "Тип", levelId: "5", boundingBoxMm: null }], notFound: [], truncated: true };
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
+
+    const withLevel = await client.callTool({ name: "get_elements", arguments: { category: "walls", levelId: "5" } });
+    const withoutLevel = await client.callTool({ name: "get_elements", arguments: { category: "doors" } });
+
+    assert.ok(!withLevel.isError && !withoutLevel.isError);
+    assert.deepEqual(bridge.frames[0]?.params, { category: "walls", levelId: "5" });
+    assert.deepEqual(bridge.frames[1]?.params, { category: "doors" });
+    assert.deepEqual(JSON.parse(textOf(withLevel)), answer);
+  });
+
+  it("offers get_elements every category word of list_types except view_templates", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const words = (name: string): string[] => {
+      const properties = listed.find((tool) => tool.name === name)?.inputSchema.properties as Record<string, { enum: string[] }> | undefined;
+      return properties?.["category"]?.enum ?? [];
+    };
+
+    assert.ok(words("get_elements").length > 0);
+    assert.deepEqual(words("list_types"), [...words("get_elements"), "view_templates"]);
+  });
+
+  it("tells the model the truth about get_elements by category", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "get_elements")?.description ?? "";
+
+    assert.match(description, /exactly one of ids and category/);
+    assert.match(description, /at most 1000, and truncated is true when more matched/);
+    assert.match(description, /only with category/);
+    assert.match(description, /notFound is always empty with category/);
+  });
+
+  it("forwards list_materials and get_warnings with no arguments, and returns Cyrillic intact", async (t) => {
+    const materials = [{ id: "7", name: "Кирпич", materialClass: "Кладка", color: { r: 1, g: 2, b: 3 }, transparency: 0 }];
+    const warnings = [{ definitionId: "9f4a1c6e-0000-4000-8000-000000000001", text: "Стены перекрываются.", elementIds: ["1", "2"], additionalElementIds: [] }];
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, frame.method === "list_materials" ? materials : warnings));
+
+    const first = await client.callTool({ name: "list_materials", arguments: {} });
+    const second = await client.callTool({ name: "get_warnings", arguments: {} });
+
+    assert.ok(!first.isError && !second.isError);
+    assert.deepEqual(bridge.frames.map((frame) => [frame.method, frame.params]), [["list_materials", {}], ["get_warnings", {}]]);
+    assert.deepEqual(JSON.parse(textOf(first)), materials);
+    assert.deepEqual(JSON.parse(textOf(second)), warnings);
+  });
+
+  it("tells the model the truth about get_warnings", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "get_warnings")?.description ?? "";
+
+    assert.match(description, /match on it and not on text/);
+    assert.match(description, /does not change with the language of Revit/);
+    assert.match(description, /An empty list means that Revit holds no warning/);
   });
 
   it("takes 1000 ids in get_elements, the most it allows", async (t) => {
