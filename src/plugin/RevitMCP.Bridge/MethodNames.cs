@@ -7,6 +7,9 @@ public static class MethodNames
     public const string GetRequestStatus = "get_request_status";
     public const string CancelRequest = "cancel_request";
     public const string GetModelInfo = "get_model_info";
+    public const string CreateProject = "create_project";
+    public const string OpenProject = "open_project";
+    public const string SaveProject = "save_project";
 
     /// <summary>Every method the bridge accepts.</summary>
     public static readonly IReadOnlyList<string> All =
@@ -15,6 +18,9 @@ public static class MethodNames
         GetRequestStatus,
         CancelRequest,
         GetModelInfo,
+        CreateProject,
+        OpenProject,
+        SaveProject,
     ];
 
     /// <summary>Methods the socket thread answers itself, so they work while the Revit main thread is busy.</summary>

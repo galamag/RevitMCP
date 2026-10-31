@@ -39,14 +39,22 @@ function textOf(result: unknown): string {
 }
 
 describe("MCP tools", { timeout: 20_000 }, () => {
-  it("lists the four stage-1 tools with descriptions", async (t) => {
+  it("lists every tool with a description", async (t) => {
     const { client } = await connect(t, () => {});
 
     const { tools } = await client.listTools();
 
     assert.deepEqual(
       tools.map((tool) => tool.name).sort(),
-      ["cancel_request", "get_model_info", "get_request_status", "get_status"],
+      [
+        "cancel_request",
+        "create_project",
+        "get_model_info",
+        "get_request_status",
+        "get_status",
+        "open_project",
+        "save_project",
+      ],
     );
     for (const tool of tools) {
       assert.ok(tool.description && tool.description.length > 0);
@@ -88,6 +96,42 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     const failed = result instanceof Error || (result as { isError?: boolean }).isError === true;
     assert.ok(failed);
     assert.equal(bridge.frames.length, 0);
+  });
+
+  it("passes a Cyrillic project name to Revit unchanged and returns the real path", async (t) => {
+    const name = "Коттедж проба";
+    const { bridge, client } = await connect(t, (frame, connection) =>
+      connection.result(frame, { name: frame.params["name"], path: `C:\\Папка\\${String(frame.params["name"])}.rvt`, dialogs: [] }),
+    );
+
+    const result = await client.callTool({ name: "create_project", arguments: { name } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "create_project");
+    assert.deepEqual(bridge.frames[0]?.params, { name });
+    assert.deepEqual(JSON.parse(textOf(result)), { name, path: `C:\\Папка\\${name}.rvt`, dialogs: [] });
+  });
+
+  for (const tool of ["create_project", "open_project"]) {
+    it(`rejects ${tool} without a name before it reaches Revit`, async (t) => {
+      const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, {}));
+
+      const result = await client.callTool({ name: tool, arguments: {} }).catch((error: unknown) => error);
+
+      const failed = result instanceof Error || (result as { isError?: boolean }).isError === true;
+      assert.ok(failed);
+      assert.equal(bridge.frames.length, 0);
+    });
+  }
+
+  it("lets save_project run with or without a name", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { dialogs: [] }));
+
+    await client.callTool({ name: "save_project", arguments: {} });
+    await client.callTool({ name: "save_project", arguments: { name: "дом" } });
+
+    assert.deepEqual(bridge.frames[0]?.params, {});
+    assert.deepEqual(bridge.frames[1]?.params, { name: "дом" });
   });
 
   it("returns a tool error, not a protocol error, when Revit is not running", async (t) => {

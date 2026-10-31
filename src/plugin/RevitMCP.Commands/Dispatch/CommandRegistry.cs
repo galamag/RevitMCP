@@ -28,7 +28,13 @@ public sealed class CommandRegistry
     }
 
     /// <summary>Builds the registry of every command the plugin ships.</summary>
-    public static CommandRegistry CreateDefault() => new([new GetModelInfoCommand()]);
+    public static CommandRegistry CreateDefault() => new(
+    [
+        new GetModelInfoCommand(),
+        new CreateProjectCommand(),
+        new OpenProjectCommand(),
+        new SaveProjectCommand(),
+    ]);
 
     /// <summary>Returns the command for this method, or <c>null</c>.</summary>
     public ICommand? Find(string method) => _byMethod.GetValueOrDefault(method);

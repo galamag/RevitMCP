@@ -19,6 +19,13 @@ const requestId = z
   .min(1)
   .describe("The requestId reported by an earlier tool call, for example in a timeout error. A text value, passed back unchanged.");
 
+const projectName = z
+  .string()
+  .min(1)
+  .describe(
+    "A bare file name in the test folder, not a path: no folders, no drive, and no dots apart from an optional .rvt ending. Russian names are fine and stay exactly as written.",
+  );
+
 export const tools: readonly ToolDefinition[] = [
   {
     name: "get_status",
@@ -71,5 +78,40 @@ export const tools: readonly ToolDefinition[] = [
       "changes to confirm them. It works with no project open: everything except openDocuments is then empty. " +
       "Related tool: get_status.",
     inputSchema: {},
+  },
+  {
+    name: "create_project",
+    description:
+      "Creates a new Revit project from the default Russian template, saves it as <name>.rvt in the test folder " +
+      "(%USERPROFILE%\\Documents\\RevitMCP) and makes it the active document. Projects already open stay open. Only " +
+      "the test folder is reachable, so pass a name and never a path. It overwrites nothing: a name already in the " +
+      "folder is refused, and then open_project is what you want. Returns { name, path, dialogs }: path is where the " +
+      "file really went, and dialogs ([{ dialogId, message }]) lists the Revit dialogs that came up and were refused, " +
+      "usually none. Takes several seconds. Related tools: open_project, save_project, get_model_info.",
+    inputSchema: { name: projectName },
+  },
+  {
+    name: "open_project",
+    description:
+      "Makes a project from the test folder (%USERPROFILE%\\Documents\\RevitMCP) the active document, opening it if " +
+      "needed. Use it to carry on after Revit restarted, or to switch back to another project. Only the test folder " +
+      "is reachable, so pass a name and never a path, and a name that is not there is refused. Returns { name, path, " +
+      "alreadyOpen, isModified, dialogs }. When alreadyOpen is true the project was open in Revit, so it was only " +
+      "activated, and any unsaved changes are still there (isModified says so) and the file on disk was not read. " +
+      "dialogs ([{ dialogId, message }]) lists the Revit dialogs that came up and were refused, usually none. " +
+      "Related tools: create_project, save_project, get_model_info.",
+    inputSchema: { name: projectName },
+  },
+  {
+    name: "save_project",
+    description:
+      "Saves the active project to its file, which must be in the test folder (%USERPROFILE%\\Documents\\RevitMCP). It " +
+      "refuses when no project is active, when the active document was never saved (use create_project) and when its " +
+      "file is elsewhere. Pass name to state which project you mean: if another one is active, nothing is saved and " +
+      "you should call open_project first. Without name it saves whatever is active. Revit keeps numbered backups " +
+      "such as <name>.0001.rvt beside the file. Returns { name, path, dialogs }: dialogs ([{ dialogId, message }]) " +
+      "lists the Revit dialogs that came up and were refused, usually none. Related tools: create_project, " +
+      "open_project, get_model_info.",
+    inputSchema: { name: projectName.optional() },
   },
 ];

@@ -4,6 +4,9 @@
     "get_status",
     "get_request_status",
     "cancel_request",
-    "get_model_info"
+    "get_model_info",
+    "create_project",
+    "open_project",
+    "save_project"
   ]
 }
