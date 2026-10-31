@@ -79,16 +79,13 @@ public sealed class PendingRequest(string id, string method, JsonElement @params
     }
 
     /// <summary>Marks the request as failed. Returns <c>false</c> if it had already finished.</summary>
-    public bool Fail(int code, string message)
-    {
-        if (!TryFinish(RequestState.Failed, null, requireQueued: false))
-        {
-            return false;
-        }
+    public bool Fail(int code, string message) => Fail(code, message, requireQueued: false);
 
-        _completion.TrySetException(new RequestFailedException(code, message));
-        return true;
-    }
+    /// <summary>
+    /// Marks the request as failed only while it is <see cref="RequestState.Queued"/>. For failures outside
+    /// the command itself: once the request runs, its real result must be recorded instead, as in <see cref="Cancel"/>.
+    /// </summary>
+    internal bool FailIfQueued(int code, string message) => Fail(code, message, requireQueued: true);
 
     /// <summary>
     /// Marks the request as cancelled. Succeeds only while the request is <see cref="RequestState.Queued"/>:
@@ -119,6 +116,17 @@ public sealed class PendingRequest(string id, string method, JsonElement @params
             _state = RequestState.Running;
             return true;
         }
+    }
+
+    private bool Fail(int code, string message, bool requireQueued)
+    {
+        if (!TryFinish(RequestState.Failed, null, requireQueued))
+        {
+            return false;
+        }
+
+        _completion.TrySetException(new RequestFailedException(code, message));
+        return true;
     }
 
     private bool TryFinish(RequestState terminal, string? cancelReason, bool requireQueued)

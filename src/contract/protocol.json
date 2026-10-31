@@ -1,0 +1,9 @@
+{
+  "protocolVersion": 1,
+  "methods": [
+    "get_status",
+    "get_request_status",
+    "cancel_request",
+    "get_model_info"
+  ]
+}
