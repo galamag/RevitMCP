@@ -24,8 +24,8 @@ const FIND_OUT =
   "Do not call undo_last_operation again before you know: it would take the next operation. Call get_last_undo_result, which says what became of this undo, or read the elements with get_elements.";
 
 /**
- * The undo did not end in a confirmation. `undone` is false when Revit was asked and did not report the undo, and
- * unknown when nobody could ask. The message is written for the model.
+ * The undo did not end in a confirmation, because Revit was asked and did not report it, or because nobody could ask.
+ * The message says which, and it is written for the model.
  */
 export class UndoNotConfirmedError extends Error {
   constructor(message: string, options?: ErrorOptions) {
