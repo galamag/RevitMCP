@@ -71,6 +71,7 @@ Full history: the `Журнал решений` note in the vault. Open question
 
 Run `dotnet` from the repository root and `npm` from `src/server`.
 
+- After a fresh clone: `dotnet restore --locked-mode` and `npm ci`. npm install scripts stay off through `src/server/.npmrc`.
 - Build the plugin and the .NET tests: `dotnet build RevitMCP.sln`. It must end with 0 warnings and 0 errors.
 - Build the MCP server: `npm run build`. `.mcp.json` starts the result, `src/server/dist/index.js`, so rebuild after changing the server.
 - Type check, tests included: `npm run typecheck`.
@@ -102,7 +103,7 @@ Defined in `.claude/agents/`. The main session orchestrates them. Suggest them w
 | `builder` | Sonnet | Builds from the plan | **The Revit model, and it alone** |
 | `inspector` | Opus | Checks the model against the plan | Nothing |
 
-Order: the main session creates an empty project and writes `catalog.md` with its real types and materials, then `architect`, then `designer`, then the user approves the plan, then `builder`, then `inspector`. `builder` never starts before that approval. The user does not know Revit, so show the floor plan drawing (`plan.svg`) rather than Revit terms.
+Order: the main session creates an empty project and writes `catalog.md` with its real types and materials, then `architect`, then `designer`, then the user approves the plan, then `builder`, then `inspector`. The main session leaves the model active before `inspector` starts, because `inspector` cannot open a project. `builder` never starts before that approval. The user does not know Revit, so show the floor plan drawing (`plan.svg`) rather than Revit terms.
 
 Revit runs commands one at a time, so only `builder` writes to a building model, and `tester` writes only to its own disposable models. Give `inspector` the plan and the model, never the architect's reasoning.
 

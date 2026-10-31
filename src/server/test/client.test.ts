@@ -11,10 +11,23 @@ import { BridgeClient } from "../src/client.ts";
 import type { BridgeClientOptions } from "../src/client.ts";
 import { BridgeRequestPendingError, BridgeRpcError, RevitNotRunningError } from "../src/errors.ts";
 import { MAX_FRAME_BYTES } from "../src/framing.ts";
-import { FakeBridge, unusedPort } from "./fakeBridge.ts";
+import { FakeBridge } from "./fakeBridge.ts";
 import type { FrameHandler, ReceivedFrame } from "./fakeBridge.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The pid of an exited process. Windows reuses pids at once, so that it is free is checked, not assumed. */
+function deadPid(): number {
+  for (;;) {
+    const { pid } = spawnSync(process.execPath, ["-e", ""]);
+    assert.ok(pid);
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return pid;
+    }
+  }
+}
 
 /** Answers every request with `{ ok: true, method }`. */
 const echo: FrameHandler = (frame, connection) => connection.result(frame, { ok: true, method: frame.method });
@@ -63,15 +76,14 @@ describe("BridgeClient", { timeout: 20_000 }, () => {
 
     it("throws RevitNotRunningError when pid is dead", async (t) => {
       const bridge = await startBridge(t);
-      const dead = spawnSync(process.execPath, ["-e", ""]);
-      assert.ok(dead.pid);
-      await bridge.writeConnectionFile({ pid: dead.pid });
+      const dead = deadPid();
+      await bridge.writeConnectionFile({ pid: dead });
       const client = makeClient(t, bridge.connectionPath);
 
       await assert.rejects(client.call("get_status", {}), (error: unknown) => {
         assert.ok(error instanceof RevitNotRunningError);
         assert.match(error.message, /start Revit/i);
-        assert.match(error.message, new RegExp(String(dead.pid)));
+        assert.match(error.message, new RegExp(String(dead)));
         return true;
       });
       assert.equal(bridge.connections.length, 0, "must not connect to a dead Revit");
