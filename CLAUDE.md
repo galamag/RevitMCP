@@ -4,7 +4,7 @@ A custom MCP server and plugin for Autodesk Revit 2027.3 that let Claude create 
 
 **First goal:** Claude builds a two-storey 300 m² cottage in Revit from scratch, with a livable floor plan and a good-looking 3D view.
 
-Current status lives in the vault note `План разработки`, not in this file. Do not write plugin or server code until the design is agreed.
+Current status lives in the vault note `План разработки`, not in this file.
 
 ## Language
 
@@ -37,7 +37,12 @@ Full history: the `Журнал решений` note in the vault. Open question
 1. **The user decides.** Confirm anything meaningful, and ask before actions that are hard to undo.
 2. **Never invent context.** If you do not know a file, API or signature, look it up or ask. Check Revit members against `RevitAPI.xml` and `RevitAPIUI.xml`.
 3. **Never expand scope.** One task is one patch. Report other problems separately and wait for a go-ahead.
-4. **The core is protected.** Do not change threading, transaction or protocol code without an explicit request. The exact file list goes here once the code exists.
+4. **The core is protected.** Do not change threading, transaction or protocol code without an explicit request. The protected files:
+   - `src/plugin/RevitMCP.Bridge`: `Framing.cs`, `RequestQueue.cs`, `RequestStore.cs`, `BridgeServer.cs`
+   - `src/plugin/RevitMCP.Commands/Dispatch`: `CommandHandler.cs`
+   - `src/plugin/RevitMCP.Commands/Revit`: `Operation.cs`, `DialogGuard.cs`, `FailureCollector.cs`, `UndoHistory.cs`, `UndoTracker.cs`
+
+   Any change that alters `RevitMCP.Plugin.dll`, including the `PluginHost.Start` or `Stop` signatures, makes Revit ask the user for Always Load again.
 5. **Verify after changes.** Build, run the tests, and exercise plugin changes in live Revit. If you cannot verify something, say so. Claude may restart Revit for this, but only when every open document is saved in `%USERPROFILE%\Documents\RevitMCP`, and never by killing the process.
 6. **Install nothing without consent.** Keep dependencies to a minimum and prefer what Node and .NET already provide. Before adding an npm or NuGet package, check GitHub Advisory Database and make sure the version is at least 14 days old unless it is a security fix. Pin exact versions and commit lock files. npm install scripts stay off. Verify downloaded programs by SHA-512 from two official sources and by digital signature before running them.
 7. **Do not copy code from other projects.** Ideas only, and only with a checked license.
@@ -51,6 +56,9 @@ Full history: the `Журнал решений` note in the vault. Open question
 - `UseRevitContext` defaults to `True`, which puts the add-in in the shared context. Dependency isolation requires setting it to `False` explicitly.
 - `Transaction.Commit` can return `RolledBack` without an exception. Always check the status.
 - Models can be in Russian: look things up by ID and `BuiltInParameter`, not by localized names.
+- The Wall tool in the Revit UI makes two real undo steps, `Set up wall tool` and `Wall - Line`.
+- A wall's bounding box can keep an old height after a roof cuts it, so read `topMm`.
+- A dialog the guard refuses can make a Revit call return null instead of throwing, as `OpenAndActivateDocument` did on a locked file.
 
 ## Environment
 
@@ -61,11 +69,15 @@ Full history: the `Журнал решений` note in the vault. Open question
 
 ## Build and run
 
-To be filled in later, there are no commands yet.
+Run `dotnet` from the repository root and `npm` from `src/server`.
 
-- Build the plugin: TBD
-- Build and run the MCP server: TBD
-- Tests: TBD
+- Build the plugin and the .NET tests: `dotnet build RevitMCP.sln`. It must end with 0 warnings and 0 errors.
+- Build the MCP server: `npm run build`. `.mcp.json` starts the result, `src/server/dist/index.js`, so rebuild after changing the server.
+- Type check, tests included: `npm run typecheck`.
+- Unit tests: `dotnet test RevitMCP.sln` and `npm test`.
+- Deploy the plugin and restart Revit: `powershell -NoProfile -ExecutionPolicy Bypass -File scriptsestart-revit.ps1`. It builds with `-p:DeployToRevit=true`, and it closes Revit only when `npm run revit:can-close` passes, so call `save_project` first. If it stops by timeout, a Revit dialog is probably waiting: do not retry, look at Revit.
+- Live tests: `npm run test:live`. They need a running Revit with the plugin loaded. Each file creates a new project in `%USERPROFILE%DocumentsRevitMCP`, leaves it open and saved, and `box.live.test.ts` keeps its snapshots in `task14-acceptance` there.
+- Reopen check: a live run prints `to check the reopen after a restart, set REVITMCP_REOPEN_NAME=<name>`. Restart Revit with the script, then run `$env:REVITMCP_REOPEN_NAME = '<name>'; npm run test:live` in PowerShell. Without that variable `reopens after a restart with the name intact` is skipped.
 
 ## Subagents
 

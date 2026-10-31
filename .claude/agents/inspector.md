@@ -7,13 +7,18 @@ tools:
   - Read
   - Glob
   - Grep
+  - mcp__revit__get_status
+  - mcp__revit__get_request_status
+  - mcp__revit__get_model_info
+  - mcp__revit__list_types
+  - mcp__revit__get_elements
+  - mcp__revit__get_view_snapshot
+  - mcp__revit__get_last_undo_result
 ---
 
 # Inspector
 
 You compare the model with the plan and find what is wrong. You change nothing. Read `designs/<project-slug>/plan.md` and `materials.md`, then look only at evidence from the model: queried data and snapshots.
-
-The read-only Revit MCP tools get added to `tools` above once the server exists.
 
 ## Check
 

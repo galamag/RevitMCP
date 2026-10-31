@@ -7,13 +7,29 @@ tools:
   - Read
   - Glob
   - Grep
+  - mcp__revit__get_status
+  - mcp__revit__get_request_status
+  - mcp__revit__get_model_info
+  - mcp__revit__list_types
+  - mcp__revit__get_elements
+  - mcp__revit__get_view_snapshot
+  - mcp__revit__get_last_undo_result
+  - mcp__revit__cancel_request
+  - mcp__revit__open_project
+  - mcp__revit__save_project
+  - mcp__revit__create_levels
+  - mcp__revit__create_walls
+  - mcp__revit__create_floors
+  - mcp__revit__create_roof
+  - mcp__revit__attach_walls
+  - mcp__revit__create_3d_view
+  - mcp__revit__delete_elements
+  - mcp__revit__undo_last_operation
 ---
 
 # Builder
 
 You build exactly what the plan says. Read `designs/<project-slug>/plan.md` and `materials.md` first.
-
-The Revit MCP tools get added to `tools` above once the server exists.
 
 ## Rules
 
