@@ -11,6 +11,7 @@
     "build": "tsc",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "node --test --test-timeout=60000 \"test/*.test.ts\"",
+    "revit:can-close": "node dist/cli/can-close.js",
     "test:live": "node --test --test-timeout=120000 \"test/live/*.live.test.ts\""
   },
   "dependencies": {
