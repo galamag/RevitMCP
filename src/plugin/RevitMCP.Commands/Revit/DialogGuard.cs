@@ -14,8 +14,9 @@ public sealed record DialogRecord(string DialogId, string Message);
 public sealed class DialogGuard
 {
     /// <summary>
-    /// Tried in order until Revit accepts one, since a dialog takes only the buttons it has. A refusal comes first,
-    /// as nobody agreed to what the dialog asks. The last two only acknowledge a dialog that offers no choice.
+    /// Tried in order until Revit accepts one. A refusal comes first, as nobody agreed to what the dialog asks.
+    /// In live Revit a task dialog took Cancel even without that button, but the API says a message box takes only
+    /// the IDs of its own buttons, so the others stay for that case, which nothing has exercised yet.
     /// </summary>
     private static readonly TaskDialogResult[] Answers =
     [
@@ -55,8 +56,6 @@ public sealed class DialogGuard
 
         try
         {
-            ArgumentNullException.ThrowIfNull(args);
-
             var message = args switch
             {
                 TaskDialogShowingEventArgs task => task.Message,

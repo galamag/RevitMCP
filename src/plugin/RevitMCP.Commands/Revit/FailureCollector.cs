@@ -17,8 +17,6 @@ public sealed class FailureCollector : IFailuresPreprocessor
 
     public FailureProcessingResult PreprocessFailures(FailuresAccessor failuresAccessor)
     {
-        ArgumentNullException.ThrowIfNull(failuresAccessor);
-
         foreach (var failure in failuresAccessor.GetFailureMessages())
         {
             if (failure.GetSeverity() == FailureSeverity.Warning)
