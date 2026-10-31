@@ -8,7 +8,8 @@ import type { ToolDefinition } from "./registry.ts";
 const SERVER_VERSION = "0.1.0";
 
 const INSTRUCTIONS =
-  "These tools drive Autodesk Revit through its RevitMCP plugin, so Revit must be running with a project open. " +
+  "These tools drive Autodesk Revit through its RevitMCP plugin, so Revit must be running. No project has to be open: " +
+  "create_project starts one and open_project continues one, both only in the test folder. " +
   "Lengths are in millimetres and angles in degrees. Element and level ids are strings; pass them back unchanged. " +
   "Start with get_model_info. If a tool reports a requestId, ask get_request_status before sending the command again.";
 

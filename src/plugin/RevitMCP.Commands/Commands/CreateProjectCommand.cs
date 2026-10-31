@@ -45,24 +45,52 @@ public sealed class CreateProjectCommand : ICommand
             (document, dialogs) => new { name = document.Title, path = document.PathName, dialogs });
     }
 
+    /// <summary>
+    /// A failure says what became of the file, read from the disk, because a retry depends on it and nothing here
+    /// deletes: whatever is at <paramref name="path"/> keeps that name taken.
+    /// </summary>
     private static Document Create(UIApplication app, string path)
     {
         var document = app.Application.NewProjectDocument(Template);
+
         try
         {
             document.SaveAs(path);
-            return app.OpenAndActivateDocument(path).Document;
         }
-        catch (Exception)
+        catch (Exception e)
         {
             CloseHidden(document);
-            throw;
+            throw Failure(e, File.Exists(path)
+                ? $"A partial file may remain at {path}. It was left there, so that name stays taken."
+                : $"No file was left at {path}.");
         }
+
+        try
+        {
+            return app.OpenAndActivateDocument(path).Document;
+        }
+        catch (Exception e)
+        {
+            CloseHidden(document);
+            throw Failure(e, File.Exists(path)
+                ? $"The project was saved at {path} and that file still exists. Use open_project to reach it."
+                : $"The project was saved at {path}, but that file is gone now.");
+        }
+    }
+
+    /// <summary>Logs the cause on its own, as the message holds a path built from the request, which stays out of the log.</summary>
+    private static RequestFailedException Failure(Exception cause, string fileState)
+    {
+        Log.Error($"{MethodNames.CreateProject} failed after it started a document.", cause);
+
+        return new RequestFailedException(
+            JsonRpcCodes.InternalError,
+            $"{MethodNames.CreateProject} failed: {cause.Message} {fileState}");
     }
 
     /// <summary>
     /// A failed step leaves the document open with no window, where nobody can reach it. Live Revit closes such a
-    /// document without a dialog. This runs while an exception is on its way, so it must not replace that exception.
+    /// document without a dialog. This runs while a failure is on its way, so it must not replace that failure.
     /// </summary>
     private static void CloseHidden(Document document)
     {

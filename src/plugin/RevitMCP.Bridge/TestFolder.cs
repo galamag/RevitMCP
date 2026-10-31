@@ -38,7 +38,9 @@ public static partial class TestFolder
 
         var problem = FindProblem(stem)
             ?? (stem!.Contains('.') ? $"apart from an optional {Extension} ending it may hold no dot" : null)
-            ?? (path.Length > MaxPathLength ? $"it is too long, as Revit can only keep paths of up to {MaxPathLength} characters here" : null);
+            ?? (path.Length > MaxPathLength
+                ? $"it is too long, as Revit can only keep paths of up to {MaxPathLength} characters, so in {Root} a name can have at most {MaxPathLength - Path.Combine(Root, Extension).Length} characters"
+                : null);
 
         return problem is null
             ? path

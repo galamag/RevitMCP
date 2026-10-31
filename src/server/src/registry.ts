@@ -23,7 +23,7 @@ const projectName = z
   .string()
   .min(1)
   .describe(
-    "A bare file name in the test folder, not a path: no folders, no drive, and no dots apart from an optional .rvt ending. Up to about 200 characters. Russian names are fine and stay exactly as written.",
+    "A bare file name in the test folder, not a path: no folders, no drive, and no dots apart from an optional .rvt ending. The full path may be at most 254 characters, and a refusal states the longest name that fits. Russian names are fine and stay exactly as written.",
   );
 
 export const tools: readonly ToolDefinition[] = [

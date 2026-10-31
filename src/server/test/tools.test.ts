@@ -61,6 +61,16 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     }
   });
 
+  it("tells the model it can create or open a project itself", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const instructions = client.getInstructions() ?? "";
+
+    assert.match(instructions, /create_project/);
+    assert.match(instructions, /open_project/);
+    assert.doesNotMatch(instructions, /with a project open/);
+  });
+
   it("forwards a call to the bridge method of the same name and returns the result as JSON text", async (t) => {
     const { bridge, client } = await connect(t, (frame, connection) =>
       connection.result(frame, { pluginVersion: "1.0.0", protocolVersion: 1, queueLength: 0, oldestQueuedSeconds: 0 }),

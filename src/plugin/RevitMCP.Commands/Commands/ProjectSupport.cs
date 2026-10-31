@@ -22,6 +22,7 @@ internal static class ProjectSupport
     /// Runs the Revit calls of a command and builds its result. <paramref name="describe"/> gets the dialogs, for the
     /// key <c>dialogs</c> in the shape of <see cref="OperationOutcome.Dialogs"/>. A dialog the guard refused is often
     /// why Revit failed, so a failure carries them in its message instead of losing them with the exception.
+    /// A <see cref="RequestFailedException"/> from <paramref name="revitCalls"/> already says what happened and keeps its code.
     /// </summary>
     public static JsonElement Run(
         string method,
@@ -33,23 +34,27 @@ internal static class ProjectSupport
         {
             document = revitCalls();
         }
+        catch (RequestFailedException e)
+        {
+            throw WithDialogs(e.Code, e.Message);
+        }
         catch (Exception e)
         {
-            var dialogs = TakeDialogs();
-            if (dialogs.Count == 0)
-            {
-                throw;
-            }
-
-            Log.Error($"{method} failed after Revit raised dialogs.", e);
-
-            var refused = string.Join("; ", dialogs.Select(dialog => $"{dialog.DialogId}: {dialog.Message}"));
-            throw new RequestFailedException(
-                JsonRpcCodes.InternalError,
-                $"{method} failed: {e.Message} Revit raised dialogs, and they were refused: {refused}");
+            Log.Error($"{method} failed.", e);
+            throw WithDialogs(JsonRpcCodes.InternalError, $"{method} failed: {e.Message}");
         }
 
         return JsonSerializer.SerializeToElement(describe(document, TakeDialogs()), Options);
+    }
+
+    private static RequestFailedException WithDialogs(int code, string message)
+    {
+        var dialogs = TakeDialogs();
+        var refused = string.Join("; ", dialogs.Select(dialog => $"{dialog.DialogId}: {dialog.Message}"));
+
+        return new RequestFailedException(
+            code,
+            dialogs.Count == 0 ? message : $"{message} Revit raised dialogs, and they were refused: {refused}");
     }
 
     private static IReadOnlyList<DialogRecord> TakeDialogs() => DialogGuard.Active?.TakeRecorded() ?? [];

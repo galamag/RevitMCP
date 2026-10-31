@@ -139,6 +139,18 @@ public class TestFolderTests
     }
 
     [Fact]
+    public void Refusal_OfALongName_StatesTheLimitForThisFolder()
+    {
+        var longest = TestFolder.Resolve(NameOfPathLength(LongestPath));
+        var longestName = Path.GetFileNameWithoutExtension(longest).Length;
+
+        var refusal = Assert.Throws<RequestFailedException>(() => TestFolder.Resolve(NameOfPathLength(LongestPath + 1)));
+
+        Assert.Contains($"at most {longestName} characters", refusal.Message);
+        Assert.Contains($"{LongestPath} characters", refusal.Message);
+    }
+
+    [Fact]
     public void Refusal_NamesTheInput()
     {
         var refusal = Assert.Throws<RequestFailedException>(() => TestFolder.Resolve(@"..\x"));

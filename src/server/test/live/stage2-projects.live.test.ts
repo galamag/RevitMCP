@@ -164,7 +164,7 @@ describe("stage 2 live checks: projects", { timeout: 120_000 }, () => {
       const refused = await refusal(client, "save_project", { name: `${name}-другой` });
 
       assert.equal(refused.code, INVALID_PARAMS);
-      assert.match(refused.message, /^no_active_document/);
+      assert.match(refused.message, /^wrong_active_document/);
       assert.deepEqual(listing(folder), before);
     });
   });
@@ -198,7 +198,7 @@ describe("stage 2 live checks: projects", { timeout: 120_000 }, () => {
 
       const refused = await refusal(client, "save_project", { name });
       assert.equal(refused.code, INVALID_PARAMS);
-      assert.match(refused.message, /^no_active_document/);
+      assert.match(refused.message, /^wrong_active_document/);
       console.log(`# save_project on the project that is not active: ${refused.message}`);
       assert.deepEqual(listing(folder), before);
 
@@ -219,6 +219,11 @@ describe("stage 2 live checks: projects", { timeout: 120_000 }, () => {
 
   it("every tool refuses to leave the test folder and the disk stays as it was", async () => {
     await withClient(async (client) => {
+      // With nothing active save_project stops at no_active_document, before it reads the name this test is about.
+      if ((await modelInfo(client)).activeDocument === null) {
+        await client.call("create_project", { name: `${name}-границы` });
+      }
+
       const escapes = [
         "..\\x",
         "../x",

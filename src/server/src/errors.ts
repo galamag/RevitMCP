@@ -70,7 +70,7 @@ export function describePluginError(code: number, message: string): string {
       return `The MCP server and the Revit plugin speak different protocol versions. Install matching versions. Plugin message: ${message}`;
     case RpcCodes.internalError:
       return message.startsWith("no_active_document")
-        ? `No project is open in Revit. Ask the user to open a project (or create one) in Revit and then try again. Plugin message: ${message}`
+        ? `No project is active in Revit. Use create_project to start one or open_project to continue one from the test folder, then try again. Plugin message: ${message}`
         : message;
     default:
       return message;

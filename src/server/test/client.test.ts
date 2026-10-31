@@ -492,14 +492,29 @@ describe("BridgeClient", { timeout: 20_000 }, () => {
       });
     });
 
-    it("maps -32603 no_active_document to a request to open a project", async (t) => {
+    it("maps -32603 no_active_document to the tools that make a project active", async (t) => {
       const bridge = await startBridge(t, failWith(-32603, "no_active_document: needs an open document."));
       const client = makeClient(t, bridge.connectionPath);
 
       await assert.rejects(client.call("get_model_info", {}), (error: unknown) => {
         assert.ok(error instanceof BridgeRpcError);
         assert.equal(error.code, -32603);
-        assert.match(error.message, /open a project/i);
+        assert.match(error.message, /create_project/);
+        assert.match(error.message, /open_project/);
+        assert.doesNotMatch(error.message, /ask the user/i);
+        return true;
+      });
+    });
+
+    it("passes wrong_active_document through unchanged, because a project is active", async (t) => {
+      const message = "wrong_active_document: C:\\a.rvt is not the active document, C:\\b.rvt is, so nothing was saved.";
+      const bridge = await startBridge(t, failWith(-32602, message));
+      const client = makeClient(t, bridge.connectionPath);
+
+      await assert.rejects(client.call("save_project", {}), (error: unknown) => {
+        assert.ok(error instanceof BridgeRpcError);
+        assert.equal(error.code, -32602);
+        assert.equal(error.message, message);
         return true;
       });
     });

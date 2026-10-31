@@ -11,6 +11,12 @@ namespace RevitMCP.Commands;
 /// </summary>
 public sealed class SaveProjectCommand : ICommand
 {
+    /// <summary>
+    /// The prefix of the refusal when another document is active. It is not <see cref="CommandHandler.NoActiveDocument"/>,
+    /// which means that nothing is active, and which the server answers with advice that would be wrong here.
+    /// </summary>
+    private const string WrongActiveDocument = "wrong_active_document";
+
     public string Method => MethodNames.SaveProject;
 
     public bool NeedsDocument => true;
@@ -41,7 +47,7 @@ public sealed class SaveProjectCommand : ICommand
         {
             throw new RequestFailedException(
                 JsonRpcCodes.InvalidParams,
-                $"{CommandHandler.NoActiveDocument}: {expected} is not the active document, {path} is, so nothing was saved. Use open_project to make it active first.");
+                $"{WrongActiveDocument}: {expected} is not the active document, {path} is, so nothing was saved. Use open_project to make it active first.");
         }
 
         return ProjectSupport.Run(
