@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>RevitMCP</Name>
+    <Assembly>RevitMCP\RevitMCP.Plugin.dll</Assembly>
+    <ClientId>b7c1f0a2-5e3d-4a8b-9c6f-2d1e7a4b3c90</ClientId>
+    <FullClassName>RevitMCP.Plugin.App</FullClassName>
+    <VendorId>RevitMCP</VendorId>
+    <VendorDescription>RevitMCP</VendorDescription>
+  </AddIn>
+  <ManifestSettings>
+    <UseRevitContext>False</UseRevitContext>
+    <ContextName>RevitMCP</ContextName>
+  </ManifestSettings>
+</RevitAddIns>

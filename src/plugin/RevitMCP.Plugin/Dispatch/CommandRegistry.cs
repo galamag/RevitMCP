@@ -1,0 +1,36 @@
+using RevitMCP.Bridge;
+using RevitMCP.Plugin.Commands;
+
+namespace RevitMCP.Plugin.Dispatch;
+
+/// <summary>
+/// The commands by method name. Must match <see cref="MethodNames.All"/> minus <see cref="MethodNames.Immediate"/>,
+/// which the socket threads answer themselves, or construction throws and the bridge stays off.
+/// </summary>
+public sealed class CommandRegistry
+{
+    private readonly Dictionary<string, ICommand> _byMethod;
+
+    public CommandRegistry(IEnumerable<ICommand> commands)
+    {
+        ArgumentNullException.ThrowIfNull(commands);
+
+        _byMethod = commands.ToDictionary(command => command.Method, StringComparer.Ordinal);
+
+        var expected = MethodNames.All.Except(MethodNames.Immediate, StringComparer.Ordinal).ToList();
+        var missing = expected.Except(_byMethod.Keys, StringComparer.Ordinal).ToList();
+        var unexpected = _byMethod.Keys.Except(expected, StringComparer.Ordinal).ToList();
+        if (missing.Count > 0 || unexpected.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "The commands do not match MethodNames. "
+                + $"Without a command: [{string.Join(", ", missing)}]. Not a queued method: [{string.Join(", ", unexpected)}].");
+        }
+    }
+
+    /// <summary>Builds the registry of every command the plugin ships.</summary>
+    public static CommandRegistry CreateDefault() => new([new GetModelInfoCommand()]);
+
+    /// <summary>Returns the command for this method, or <c>null</c>.</summary>
+    public ICommand? Find(string method) => _byMethod.GetValueOrDefault(method);
+}
