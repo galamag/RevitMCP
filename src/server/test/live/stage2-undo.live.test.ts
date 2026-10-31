@@ -260,9 +260,13 @@ describe("stage 2 live checks: delete and undo", { timeout: 120_000 }, () => {
       assert.ok(levelId);
       const [wallId] = await createWalls(client, 1, levelId);
       assert.ok(wallId);
+      const corners = [{ x: 200_000, y: 0 }, { x: 203_000, y: 0 }, { x: 203_000, y: 3000 }];
+      const floors = await batch(client, "create_floors", [{ boundaryMm: corners, typeId: ctx().floorType.id, levelId }]);
+      const floorId = floors.items[0]?.elementId;
+      assert.ok(floorId, JSON.stringify(floors));
       await client.call("save_project", {});
       const before = await modelInfo(client);
-      const rowsBefore = await find(client, [levelId, wallId]);
+      const rowsBefore = await find(client, [levelId, wallId, floorId]);
       assert.equal(before.activeDocument?.isModified, false);
 
       const result = await remove(client, { ids: [levelId], dryRun: true });
@@ -276,10 +280,24 @@ describe("stage 2 live checks: delete and undo", { timeout: 120_000 }, () => {
       assert.ok(result.allAffected.includes(levelId), "the level itself is affected");
       assert.ok(result.allAffected.includes(wallId), "the wall on the level is affected");
       assert.ok(result.dependents.includes(wallId), "the wall is listed as a dependent");
+      assert.ok(result.dependents.includes(floorId), "the floor is listed as a dependent");
       assert.ok(!result.dependents.includes(levelId), "the level was asked for, so it is no dependent");
 
-      assert.deepEqual(await find(client, [levelId, wallId]), rowsBefore);
+      assert.deepEqual(await find(client, [levelId, wallId, floorId]), rowsBefore);
       assert.deepEqual(await modelInfo(client), before);
+    });
+  });
+
+  it("a dry run of a type lists the walls of that type", async () => {
+    await withClient(async (client) => {
+      const [wallId] = await createWalls(client, 1);
+      assert.ok(wallId);
+
+      const result = await remove(client, { ids: [ctx().wallType.id] });
+
+      assert.deepEqual(result.errors, []);
+      assert.ok(result.dependents.includes(wallId), JSON.stringify(result));
+      await assertThere(client, [wallId, ctx().wallType.id]);
     });
   });
 

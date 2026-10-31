@@ -58,7 +58,7 @@ public sealed class UndoLastOperationCommand(UndoTracker tracker) : ICommand
             + "Nothing was undone. Use open_project to make that project active first.",
         { Verdict: UndoVerdict.NotOurs, Step: { } step } =>
             $"the last change in '{step.DocumentTitle}' is '{step.Name}', which did not come from these tools, and Undo would take that. Nothing was undone. "
-            + "Ask the user: only they can undo their own change, and after that this tool works again.",
+            + "Only the user can undo that, in Revit, so ask them to and then try again.",
         _ => $"there is nothing to undo in '{activeTitle}': no operation of these tools is in its history. A project opened or created in this Revit session starts with an empty history.",
     };
 }

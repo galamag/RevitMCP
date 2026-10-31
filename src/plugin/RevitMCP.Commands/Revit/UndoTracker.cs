@@ -66,7 +66,7 @@ public sealed class UndoTracker
                 History.Redone(key, document.Title, names);
                 break;
 
-            // A rolled back transaction never reached the history.
+            // A rolled back transaction never reached the history. Live Revit raises this event for one, as for a dry run.
             default:
                 break;
         }

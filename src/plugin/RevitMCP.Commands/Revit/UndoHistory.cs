@@ -45,10 +45,11 @@ internal sealed record UndoAttempt(long Id, UndoStep Step, DateTimeOffset Posted
 
 /// <summary>
 /// A copy of Revit's undo history, one per open document, because the API cannot read the real one. It is kept from
-/// the document events alone, so it can only be as right as they are: live Revit matched it in every probe. Where it
-/// loses track it forgets what lay below, in the direction of refusing: a step that says "ours" must never be wrong,
-/// since Undo takes whatever is on top of the real history. No Revit type appears here, so the tests can compile this
-/// file. All of it runs on the Revit main thread.
+/// the document events alone, so it can only be as right as they are: live Revit matched it in every probe, except for
+/// a transaction group, whose steps it reports one by one and then undoes under the name of the group. Where it loses
+/// track it forgets what lay below, in the direction of refusing: a step that says "ours" must never be wrong, since
+/// Undo takes whatever is on top of the real history. No Revit type appears here, so the tests can compile this file.
+/// All of it runs on the Revit main thread.
 /// </summary>
 internal sealed class UndoHistory(TimeProvider clock)
 {

@@ -414,7 +414,7 @@ export const tools: readonly ToolDefinition[] = [
       "Use it that way first: Revit also deletes everything that depends on an element, without asking. A level takes the walls, floors and views on it, and a wall type takes every wall of that type. " +
       "A dry run really runs the delete in Revit and rolls it back: the model, the Undo history and the unsaved state stay as they were. It stops before Revit's final check at commit, so a real delete can still be refused. " +
       `Take 1 to ${MAX_ELEMENT_IDS} ids from other tools. An id asked twice counts once. The whole list is checked first: text that cannot be an id, an id with no element, or an element Revit cannot delete refuses the call, naming the ids, and nothing changes. ` +
-      "Revit will not delete the view open in its window, the level of that view, or its own internal elements. Even then each id can pass and the list still be refused as a whole, as every wall type at once was: that comes back as committed false with the reason in errors. " +
+      "Revit will not delete the view open in its window, the level that view belongs to, or its own internal elements. And each id can pass and the list still be refused as a whole, as every wall type at once was: that comes back as committed false with the reason in errors. " +
       "Returns { dryRun, committed, summary, requested, allAffected, dependents, warnings, errors, dialogs }. allAffected lists every id that goes or would go, the requested ones included, and dependents only those you did not ask for. " +
       "Read them before a real delete. Some of them are not model elements you know, such as views or internal elements: read them with get_elements. " +
       "On a real delete committed true means they are gone, as one Undo step, and the project has unsaved changes. committed false means nothing was deleted, allAffected is empty and errors holds the reason. " +
@@ -435,7 +435,7 @@ export const tools: readonly ToolDefinition[] = [
       "It refuses, and nothing changes, when the error text starts with undo_refused: when nothing of these tools is in the history of the active project, which is always so right after create_project or open_project opened it, as Revit keeps no history in the file; " +
       "when the last change in the project came from somewhere else, such as the user in Revit, because Undo would take that instead: only the user can undo their own change; " +
       "when the last operation of these tools lies in another project: make that one active with open_project first; and when an earlier undo is still unconfirmed. " +
-      "A failed call that does not start with undo_refused means the undo was posted, or may have been, without a confirmation, and the text says which. Then do not call this again blindly, as it would take the next operation: " +
+      "When the text of a failed call says the undo was posted and not confirmed, or that this is not known, do not call this again blindly, as it would take the next operation: " +
       "ask get_last_undo_result first. After an undo the project may read as saved or as changed, whichever is true: see isModified in get_model_info. There is no redo tool. " +
       "Related tools: get_last_undo_result, delete_elements, get_model_info.",
     inputSchema: {},

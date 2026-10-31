@@ -60,7 +60,7 @@ public sealed class DeleteElementsCommand : ICommand
     private static string Summarize(bool dryRun, bool passed, int count) => (dryRun, passed) switch
     {
         (true, true) => $"Dry run: nothing was deleted. Elements a real delete would take: {count}. Pass dryRun false to delete.",
-        (true, false) => "Dry run: nothing was deleted, and Revit refused the delete, see errors. A real delete would be refused too.",
+        (true, false) => "Dry run: nothing was deleted, and Revit refused this delete, see errors.",
         (false, true) => $"Elements deleted: {count}, as one Undo step.",
         (false, false) => "Nothing was deleted: Revit rolled the delete back, see errors.",
     };

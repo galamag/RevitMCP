@@ -213,6 +213,33 @@ public class UndoHistoryTests
         Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
     }
 
+    /// <summary>Live Revit: a group of two commits comes as two events, and its undo as one, in the name of the group.</summary>
+    [Fact]
+    public void Undone_OfAnAssimilatedGroup_RefusesFromThenOn_SoOurStepBelowIsLostToUndoNotWronglyTaken()
+    {
+        Commit(Active, Ours);
+        Commit(Active, "Inner 1");
+        Commit(Active, "Inner 2");
+        Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
+
+        _history.Undone(Active, "Дом", ["Group"]);
+
+        Assert.Equal(UndoVerdict.NotOurs, _history.Decide(Active).Verdict);
+    }
+
+    /// <summary>Live Revit: a rolled back group names its steps, the last one first.</summary>
+    [Fact]
+    public void Undone_OfARolledBackGroup_LeavesOurStepOnTop()
+    {
+        Commit(Active, Ours);
+        Commit(Active, "Inner 1");
+        Commit(Active, "Inner 2");
+
+        _history.Undone(Active, "Дом", ["Inner 2", "Inner 1"]);
+
+        Assert.Equal(UndoVerdict.Allowed, _history.Decide(Active).Verdict);
+    }
+
     [Fact]
     public void Undone_OnAnEmptyHistory_LeavesNothingThatLooksLikeOurs()
     {
