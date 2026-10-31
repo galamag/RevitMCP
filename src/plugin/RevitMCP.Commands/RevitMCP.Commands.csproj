@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- RevitAPI.dll is x64 only, and referencing it from AnyCPU raises a warning, which is an error here. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <RevitInstallDir Condition="'$(RevitInstallDir)' == ''">C:\Program Files\Autodesk\Revit 2027</RevitInstallDir>
+    <Version>1.0.0</Version>
+    <!-- Seen in get_status.pluginVersion, so a rebuild is visible. It lives here and never in RevitMCP.Plugin,
+         whose DLL must stay byte-identical. -->
+    <BuildStamp>$([System.DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))</BuildStamp>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The Revit API refers to WindowsBase and System.Drawing, which live in the desktop framework that Revit runs on. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+    <Reference Include="RevitAPI">
+      <HintPath>$(RevitInstallDir)\RevitAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>$(RevitInstallDir)\RevitAPIUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RevitMCP.Bridge\RevitMCP.Bridge.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BuildStamp</_Parameter1>
+      <_Parameter2>$(BuildStamp)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

@@ -2,7 +2,7 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using RevitMCP.Bridge;
 
-namespace RevitMCP.Plugin.Dispatch;
+namespace RevitMCP.Commands.Dispatch;
 
 /// <summary>Raises the Revit external event. <c>Raise</c> is the only Revit call allowed off the main thread.</summary>
 public sealed class ExternalEventSignal(ExternalEvent externalEvent) : IEventSignal

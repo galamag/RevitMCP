@@ -1,41 +1,26 @@
-using System.Diagnostics;
-using System.Security.Cryptography;
+using System.Runtime.CompilerServices;
 using Autodesk.Revit.UI;
-using RevitMCP.Bridge;
-using RevitMCP.Plugin.Dispatch;
+using RevitMCP.Commands;
 
 namespace RevitMCP.Plugin;
 
 /// <summary>
-/// Revit's entry point: hosts the bridge for the length of the session. A failure here must not cost the user
-/// their Revit, so nothing is thrown at Revit: the reason goes to the log and the bridge stays off.
+/// Revit's entry point, and nothing else: it hands both calls to <see cref="PluginHost"/> in RevitMCP.Commands.
+/// Revit asks the user to trust an unsigned add-in whenever this DLL changes, so keep it minimal and free of
+/// anything that varies between builds. It does not use <c>Log</c> either: if RevitMCP.Commands.dll is missing,
+/// the failure must still reach the catch here.
 /// </summary>
 public sealed class App : IExternalApplication
 {
-    private const int TokenBytes = 32;
-
-    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);
-
-    private static readonly TimeSpan DrainInterval = TimeSpan.FromSeconds(1);
-
-    private static readonly string ConnectionPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "RevitMCP",
-        "connection.json");
-
-    private BridgeServer? _server;
-    private Timer? _drainTimer;
-
     public Result OnStartup(UIControlledApplication application)
     {
         try
         {
-            StartBridge();
+            Start(application);
         }
         catch (Exception e)
         {
-            Log.Error("The bridge stays off: its startup failed.", e);
-            TearDown();
+            Report("OnStartup failed, so the bridge stays off.", e);
         }
 
         return Result.Succeeded;
@@ -43,111 +28,45 @@ public sealed class App : IExternalApplication
 
     public Result OnShutdown(UIControlledApplication application)
     {
-        TearDown();
+        try
+        {
+            Stop(application);
+        }
+        catch (Exception e)
+        {
+            Report("OnShutdown failed.", e);
+        }
+
         return Result.Succeeded;
     }
 
     /// <summary>
-    /// The bridge types stay out of this method and of the two above, so that even a missing
-    /// <c>RevitMCP.Bridge.dll</c> surfaces inside a try: the runtime resolves them when it compiles a method.
+    /// The only places that name <see cref="PluginHost"/>. The runtime loads RevitMCP.Commands.dll when it compiles
+    /// a method that uses it, so these stay separate from the methods with the try blocks above, and are never inlined into them.
     /// </summary>
-    private void TearDown()
-    {
-        _drainTimer?.Dispose();
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void Start(UIControlledApplication application) => PluginHost.Start(application);
 
-        try
-        {
-            StopBridge();
-        }
-        catch (Exception e)
-        {
-            Log.Error("The bridge did not stop cleanly.", e);
-        }
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void Stop(UIControlledApplication application) => PluginHost.Stop(application);
 
-        try
-        {
-            DeleteConnectionFile();
-        }
-        catch (Exception e)
-        {
-            Log.Error("Could not delete the connection file.", e);
-        }
-    }
-
-    private void StartBridge()
-    {
-        var commands = CommandRegistry.CreateDefault();
-        if (!MayClaimConnectionFile())
-        {
-            return;
-        }
-
-        var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(TokenBytes));
-        var clock = TimeProvider.System;
-        var queue = new RequestQueue(clock);
-        var handler = new CommandHandler(queue, commands);
-        var signal = new ExternalEventSignal(ExternalEvent.Create(handler));
-        handler.Signal = signal;
-
-        _server = new BridgeServer(token, queue, new RequestStore(Limits.ResultCapacity), signal, clock);
-        var port = _server.StartAsync().GetAwaiter().GetResult();
-        ConnectionFile.Write(ConnectionPath, new ConnectionInfo(port, token, Environment.ProcessId, BridgeServer.ProtocolVersion));
-
-        // The fallback for signals Revit left unserved or refused. It runs off the main thread, see SignalIfQueued.
-        _drainTimer = new Timer(_ => handler.SignalIfQueued(), null, DrainInterval, DrainInterval);
-
-        Log.Info($"The bridge listens on 127.0.0.1:{port}, protocol version {BridgeServer.ProtocolVersion}.");
-    }
-
-    private static bool MayClaimConnectionFile()
+    /// <summary>Appends to the same file as <c>Log</c>. Never throws, because it runs inside Revit.</summary>
+    private static void Report(string message, Exception exception)
     {
         try
         {
-            if (ConnectionFile.CanClaim(ConnectionPath, IsRevitRunning))
-            {
-                return true;
-            }
-
-            Log.Info($"The bridge stays off: {ConnectionPath} belongs to another running Revit.");
-            return false;
+            var path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "RevitMCP",
+                "plugin.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.AppendAllText(
+                path,
+                $"{DateTimeOffset.Now:O} [{Environment.ProcessId}] ERROR {message}{Environment.NewLine}{exception}{Environment.NewLine}");
         }
-        catch (Exception e)
+        catch (Exception)
         {
-            Log.Error($"The bridge stays off: could not read {ConnectionPath} to find its owner.", e);
-            return false;
-        }
-    }
-
-    /// <summary>Checks the name as well as the ID: a crash leaves the file behind, and Windows reuses process IDs.</summary>
-    private static bool IsRevitRunning(int pid)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(pid);
-            return string.Equals(process.ProcessName, "Revit", StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception e) when (e is ArgumentException or InvalidOperationException)
-        {
-            // No such process, or it exited between the two calls.
-            return false;
-        }
-    }
-
-    private void StopBridge()
-    {
-        if (_server?.StopAsync().Wait(StopTimeout) == false)
-        {
-            Log.Error($"The bridge did not stop within {StopTimeout.TotalSeconds:0} s.");
-        }
-    }
-
-    /// <summary>Leaves the file alone unless it names this process: it may be another Revit's.</summary>
-    private static void DeleteConnectionFile()
-    {
-        // CanClaim is false only for a file whose owner the delegate calls alive, so here, for one naming us.
-        if (!ConnectionFile.CanClaim(ConnectionPath, pid => pid == Environment.ProcessId))
-        {
-            File.Delete(ConnectionPath);
+            // Nothing is worth failing Revit's startup for.
         }
     }
 }

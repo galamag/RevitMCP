@@ -2,7 +2,7 @@ using System.Text.Json;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 
-namespace RevitMCP.Plugin.Dispatch;
+namespace RevitMCP.Commands.Dispatch;
 
 /// <summary>What a command gets to work with. <see cref="Document"/> is the active document, if any.</summary>
 public sealed record CommandContext(UIApplication UiApp, Document? Document);

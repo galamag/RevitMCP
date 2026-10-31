@@ -1,4 +1,4 @@
-namespace RevitMCP.Plugin;
+namespace RevitMCP.Commands;
 
 /// <summary>
 /// Appends to <c>%LOCALAPPDATA%\RevitMCP\plugin.log</c>. Never throws, because it runs inside Revit.

@@ -1,11 +1,26 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!--
+    The entry DLL. Revit asks the user to trust an unsigned add-in whenever this DLL changes, so it holds only
+    App.cs and must build to the same bytes whatever happens in RevitMCP.Commands: no version stamp, no git hash,
+    no timestamp, and no absolute path in the embedded PDB path.
+  -->
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <!-- RevitAPI.dll is x64 only, and referencing it from AnyCPU raises a warning, which is an error here. -->
     <PlatformTarget>x64</PlatformTarget>
     <RevitInstallDir Condition="'$(RevitInstallDir)' == ''">C:\Program Files\Autodesk\Revit 2027</RevitInstallDir>
     <RevitAddinsDir Condition="'$(RevitAddinsDir)' == ''">$(APPDATA)\Autodesk\Revit\Addins\2027</RevitAddinsDir>
+
+    <Deterministic>true</Deterministic>
+    <!-- A PDB records the MVID of every referenced assembly, and the DLL's debug directory is derived from it, so any
+         rebuild of RevitMCP.Commands would change this DLL. With no PDB there is nothing to vary. -->
+    <DebugType>none</DebugType>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Version>1.0.0</Version>
+    <!-- Maps the repo root, so the checkout location does not leak into the embedded PDB path. -->
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..'))</RepoRoot>
+    <PathMap>$(RepoRoot)=/_/</PathMap>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,15 +37,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\RevitMCP.Bridge\RevitMCP.Bridge.csproj" />
+    <ProjectReference Include="..\RevitMCP.Commands\RevitMCP.Commands.csproj" />
   </ItemGroup>
 
   <!-- Off by default: a running Revit holds these DLLs, so an ordinary build must not touch them. -->
   <Target Name="DeployToRevitAddins" AfterTargets="Build" Condition="'$(DeployToRevit)' == 'true'">
     <ItemGroup>
       <DeployFile Include="$(TargetDir)RevitMCP.Plugin.dll" />
-      <DeployFile Include="$(TargetDir)RevitMCP.Plugin.pdb" />
       <DeployFile Include="$(TargetDir)RevitMCP.Plugin.deps.json" />
+      <DeployFile Include="$(TargetDir)RevitMCP.Commands.dll" />
+      <DeployFile Include="$(TargetDir)RevitMCP.Commands.pdb" />
       <DeployFile Include="$(TargetDir)RevitMCP.Bridge.dll" />
       <DeployFile Include="$(TargetDir)RevitMCP.Bridge.pdb" />
     </ItemGroup>

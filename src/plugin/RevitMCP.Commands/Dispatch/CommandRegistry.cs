@@ -1,7 +1,6 @@
 using RevitMCP.Bridge;
-using RevitMCP.Plugin.Commands;
 
-namespace RevitMCP.Plugin.Dispatch;
+namespace RevitMCP.Commands.Dispatch;
 
 /// <summary>
 /// The commands by method name. Must match <see cref="MethodNames.All"/> minus <see cref="MethodNames.Immediate"/>,

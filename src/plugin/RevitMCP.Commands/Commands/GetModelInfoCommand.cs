@@ -1,9 +1,9 @@
 using System.Text.Json;
 using Autodesk.Revit.DB;
 using RevitMCP.Bridge;
-using RevitMCP.Plugin.Dispatch;
+using RevitMCP.Commands.Dispatch;
 
-namespace RevitMCP.Plugin.Commands;
+namespace RevitMCP.Commands;
 
 /// <summary>
 /// Describes the active document and lists every open one. IDs are strings and elevations are millimetres.

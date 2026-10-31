@@ -34,7 +34,7 @@ public sealed class BridgeServer
 
     private static readonly TimeSpan AcceptRetryDelay = TimeSpan.FromMilliseconds(100);
 
-    private static readonly string PluginVersion =
+    private static readonly string DefaultPluginVersion =
         typeof(BridgeServer).Assembly.GetName().Version?.ToString() ?? "unknown";
 
     private static readonly JsonSerializerOptions StatusJson = new(JsonSerializerOptions.Web)
@@ -48,13 +48,14 @@ public sealed class BridgeServer
     private readonly RequestStore _store;
     private readonly IEventSignal _signal;
     private readonly TimeProvider _clock;
+    private readonly string _pluginVersion;
     private readonly CancellationTokenSource _stopping = new();
 
     private TcpListener? _listener;
     private ITimer? _expiryTimer;
     private Task _acceptLoop = Task.CompletedTask;
 
-    public BridgeServer(string token, RequestQueue queue, RequestStore store, IEventSignal signal, TimeProvider clock)
+    public BridgeServer(string token, RequestQueue queue, RequestStore store, IEventSignal signal, TimeProvider clock, string? pluginVersion = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(token);
 
@@ -63,6 +64,7 @@ public sealed class BridgeServer
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _signal = signal ?? throw new ArgumentNullException(nameof(signal));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _pluginVersion = string.IsNullOrEmpty(pluginVersion) ? DefaultPluginVersion : pluginVersion;
     }
 
     /// <summary>Starts listening on a port the system picks, and returns that port.</summary>
@@ -295,7 +297,7 @@ public sealed class BridgeServer
 
     private JsonElement GetStatus() => JsonSerializer.SerializeToElement(new
     {
-        pluginVersion = PluginVersion,
+        pluginVersion = _pluginVersion,
         protocolVersion = ProtocolVersion,
         queueLength = _queue.Count,
         oldestQueuedSeconds = _queue.OldestQueuedSeconds,
