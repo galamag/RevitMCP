@@ -3,7 +3,7 @@
   <!--
     The entry DLL. Revit asks the user to trust an unsigned add-in whenever this DLL changes, so it holds only
     App.cs and must build to the same bytes whatever happens in RevitMCP.Commands: no version stamp, no git hash,
-    no timestamp, and no absolute path in the embedded PDB path.
+    no timestamp, no PDB.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -18,9 +18,6 @@
     <DebugType>none</DebugType>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Version>1.0.0</Version>
-    <!-- Maps the repo root, so the checkout location does not leak into the embedded PDB path. -->
-    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..'))</RepoRoot>
-    <PathMap>$(RepoRoot)=/_/</PathMap>
   </PropertyGroup>
 
   <ItemGroup>

@@ -11,6 +11,8 @@ namespace RevitMCP.Commands;
 /// Hosts the bridge for the length of the Revit session. <c>RevitMCP.Plugin.App</c>, the stable entry point,
 /// only forwards to <see cref="Start"/> and <see cref="Stop"/>. A failure here must not cost the user their Revit,
 /// so nothing is thrown at Revit: the reason goes to the log and the bridge stays off.
+/// The signatures of <see cref="Start"/> and <see cref="Stop"/> are frozen: changing one changes the entry DLL,
+/// and Revit then asks the user to trust the add-in again.
 /// </summary>
 public static class PluginHost
 {
