@@ -30,6 +30,12 @@ const MAX_ELEMENT_IDS = 1000;
 const MAX_SUN_AZIMUTH_DEG = 360;
 const MAX_SUN_ALTITUDE_DEG = 90;
 
+/** The most items one create_ call takes, which the plugin checks too. */
+const MAX_BATCH_ITEMS = 500;
+
+/** The fewest points of a floor outline, which the plugin checks too. */
+const MIN_OUTLINE_POINTS = 3;
+
 const requestId = z
   .string()
   .min(1)
@@ -46,6 +52,26 @@ const modelPoint = (what: string) =>
   z
     .object({ x: z.number(), y: z.number(), z: z.number() })
     .describe(`${what}, as { x, y, z } in millimetres in model coordinates, the same as boundingBoxMm of get_elements. z is the height above the project origin, not above a level.`);
+
+const planPoint = (what: string) =>
+  z.strictObject({ x: z.number(), y: z.number() }).describe(`${what}, as { x, y } in millimetres in model coordinates. The height comes from the level.`);
+
+const elementId = (what: string) => z.string().min(1).describe(`${what}, as a string, passed on unchanged.`);
+
+const batchOf = <T extends z.ZodType>(item: T) => z.array(item).min(1).max(MAX_BATCH_ITEMS).describe(`The items to create, from 1 to ${MAX_BATCH_ITEMS}.`);
+
+/** The part every create_ tool says the same way. */
+const BATCH_RULES =
+  `One call takes 1 to ${MAX_BATCH_ITEMS} items and is one transaction, so one Undo step: all of it lands, or none of it. ` +
+  "The whole list is checked before anything changes, and a problem in any item refuses the call with an error naming the item and, for a bad id, the valid ones. " +
+  "Nothing is substituted. Otherwise it returns { committed, items, warnings, errors, dialogs }. Read committed first: when it is false the model did not change and errors holds the reason in Revit's own words. " +
+  "items has one entry per requested item, in order: { index, status, elementId, requested, actual, warnings, error }. index counts from 0. requested is the item as received, " +
+  "and actual is what Revit really produced, read back from the model, so compare the two. elementId and actual are null unless the element exists. " +
+  "created means the element is in the model. failed means Revit refused this item while the batch ran, and error says why: the batch stops there and nothing lands. " +
+  "rolled_back means this item is not in the model because the batch did not land: it was created and undone, or, when its error says not attempted, the batch stopped before it. " +
+  "When Revit refuses only at the end, no item is failed: every item is rolled_back and the reason is in errors. " +
+  "warnings at the top lists what Revit reported about the model, such as overlapping walls, and these do not stop a batch, so read them. dialogs ([{ dialogId, message }]) lists the Revit dialogs that came up and were refused, usually none. " +
+  "The project then has unsaved changes.";
 
 export const tools: readonly ToolDefinition[] = [
   {
@@ -225,5 +251,81 @@ export const tools: readonly ToolDefinition[] = [
         .describe("The width of the image in pixels. The height follows from the shape of the view."),
     },
     present: presentSnapshot(),
+  },
+  {
+    name: "create_levels",
+    description:
+      "Creates levels in the active project, each with a floor plan view unless createPlan is false. elevationMm is in " +
+      "millimetres above the project origin, the same as elevationMm of get_model_info. A name that already exists, " +
+      "matched exactly, gives status already_existed with that level's id in elementId, and the level is left as it " +
+      "is. actual then shows what it really is, so read it: when its elevation differs from the request, or createPlan " +
+      "is true and it has no plan, the item carries a warning and nothing was moved or added. Such a level is usable, " +
+      "but it is not what you asked for. When every item already exists, nothing changes and no Undo step is added. " +
+      "already_existed still stands when the batch fails. The same name twice in one list is refused. actual is " +
+      "{ name, elevationMm, planViewId, planViewName }, and planViewId is null without a plan. " +
+      BATCH_RULES +
+      " Related tools: get_model_info, create_walls, create_floors, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.strictObject({
+          name: z.string().min(1).describe("The exact name of the level. Russian is fine. Revit forbids some characters in names, such as { } [ ] | ; < > ? ` ~ \\ :"),
+          elevationMm: z.number().describe("The height of the level above the project origin, in millimetres."),
+          createPlan: z.boolean().default(true).describe("Whether to create a floor plan view of the new level."),
+        }),
+      ),
+    },
+  },
+  {
+    name: "create_walls",
+    description:
+      "Creates straight walls in the active project. startMm and endMm are the ends of the wall's centre line in " +
+      "millimetres in model coordinates, so a wall of width 200 from y = 0 reaches from y = -100 to y = 100. Take typeId " +
+      "from list_types with walls, and levelId and topLevelId from get_model_info. A wall stands on levelId, lifted by " +
+      "baseOffsetMm, which may be negative. Give exactly one of heightMm, a fixed height in millimetres that stays the " +
+      "same when levels move, and topLevelId, which ties the top of the wall to that level. A top level must be above " +
+      "the foot of the wall. Walls join their neighbours by Revit's own rules, and this tool changes no other element. " +
+      "actual is { startMm, endMm, lengthMm, heightMm, widthMm, baseOffsetMm, typeId, levelId, topLevelId }: lengthMm is " +
+      "along the centre line, heightMm is measured from the foot of the wall, and topLevelId is null for a fixed height. " +
+      BATCH_RULES +
+      " Related tools: list_types, get_model_info, get_elements, create_floors, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z
+          .strictObject({
+            startMm: planPoint("One end of the centre line"),
+            endMm: planPoint("The other end of the centre line"),
+            typeId: elementId("The id of a wall type from list_types"),
+            levelId: elementId("The id of the level the wall stands on"),
+            heightMm: z.number().positive().optional().describe("A fixed height in millimetres. Give this or topLevelId, not both."),
+            topLevelId: elementId("The id of the level that holds the top of the wall. Give this or heightMm, not both").optional(),
+            baseOffsetMm: z.number().default(0).describe("How far the foot of the wall sits above its level, in millimetres. Negative is below."),
+          })
+          .refine((item) => (item.heightMm === undefined) !== (item.topLevelId === undefined), {
+            message: "Give exactly one of heightMm and topLevelId.",
+          }),
+      ),
+    },
+  },
+  {
+    name: "create_floors",
+    description:
+      "Creates floors in the active project from outlines of straight edges. boundaryMm lists the corners in " +
+      "millimetres in model coordinates, in either direction. The outline closes by itself from the last point to the " +
+      `first, so do not repeat the first point: equal neighbouring points are refused. It needs at least ${MIN_OUTLINE_POINTS} points. ` +
+      "An outline with crossing edges is refused or fails, and it never lands. Take typeId from list_types with floors " +
+      "and levelId from get_model_info. The top of the floor lies on the level, so its thickness goes downwards. " +
+      "actual is { areaM2, heightOffsetMm, typeId, levelId, boundingBoxMm }: areaM2 is in square metres, and " +
+      "boundingBoxMm is { min, max } in millimetres. " +
+      BATCH_RULES +
+      " Related tools: list_types, get_model_info, get_elements, create_walls, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.strictObject({
+          boundaryMm: z.array(planPoint("A corner of the outline")).min(MIN_OUTLINE_POINTS).describe(`The corners of the outline, at least ${MIN_OUTLINE_POINTS}. It closes by itself.`),
+          typeId: elementId("The id of a floor type from list_types"),
+          levelId: elementId("The id of the level the floor lies on"),
+        }),
+      ),
+    },
   },
 ];

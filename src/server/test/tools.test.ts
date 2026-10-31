@@ -42,6 +42,10 @@ function textOf(result: unknown): string {
   return content.map((part) => part.text).join("\n");
 }
 
+const wall = { startMm: { x: 0, y: 0 }, endMm: { x: 6000.5, y: 0 }, typeId: "1", levelId: "2" };
+const floor = { boundaryMm: [{ x: 0, y: 0 }, { x: 6000, y: 0 }, { x: 6000, y: 4000 }], typeId: "1", levelId: "2" };
+const batch = <T>(length: number, item: T): T[] => Array.from({ length }, () => item);
+
 describe("MCP tools", { timeout: 20_000 }, () => {
   it("lists every tool with a description", async (t) => {
     const { client } = await connect(t, () => {});
@@ -53,7 +57,10 @@ describe("MCP tools", { timeout: 20_000 }, () => {
       [
         "cancel_request",
         "create_3d_view",
+        "create_floors",
+        "create_levels",
         "create_project",
+        "create_walls",
         "get_elements",
         "get_model_info",
         "get_request_status",
@@ -185,8 +192,34 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["get_view_snapshot", { viewId: "123", widthPx: 1600.5 }],
     ["get_view_snapshot", { viewId: "123", widthPx: 10 }],
     ["get_view_snapshot", { viewId: "123", widthPx: 100_000 }],
+    ["create_levels", {}],
+    ["create_levels", { items: [] }],
+    ["create_levels", { items: [{ name: "Этаж" }] }],
+    ["create_levels", { items: [{ elevationMm: 3000 }] }],
+    ["create_levels", { items: [{ name: "", elevationMm: 3000 }] }],
+    ["create_levels", { items: [{ name: "Этаж", elevationMm: "3000" }] }],
+    ["create_levels", { items: [{ name: "Этаж", elevationMm: 3000, createPlan: "да" }] }],
+    ["create_levels", { items: [{ name: "Этаж", elevationMm: 3000, plan: true }] }],
+    ["create_levels", { items: batch(501, { name: "Этаж", elevationMm: 3000 }) }],
+    ["create_walls", { items: [] }],
+    ["create_walls", { items: [wall] }],
+    ["create_walls", { items: [{ ...wall, heightMm: 3000, topLevelId: "2" }] }],
+    ["create_walls", { items: [{ ...wall, heightMm: 0 }] }],
+    ["create_walls", { items: [{ ...wall, heightMm: -3000 }] }],
+    ["create_walls", { items: [{ ...wall, heightMm: 3000, typeId: 56766 }] }],
+    ["create_walls", { items: [{ ...wall, heightMm: 3000, levelId: "" }] }],
+    ["create_walls", { items: [{ ...wall, heightMm: 3000, startMm: { x: 1 } }] }],
+    ["create_walls", { items: [{ ...wall, heightMm: 3000, startMm: { x: 1, y: 2, z: 3 } }] }],
+    ["create_walls", { items: [{ ...wall, heightMm: 3000, height: 3000 }] }],
+    ["create_walls", { items: batch(501, { ...wall, heightMm: 3000 }) }],
+    ["create_floors", { items: [] }],
+    ["create_floors", { items: [{ ...floor, boundaryMm: floor.boundaryMm.slice(0, 2) }] }],
+    ["create_floors", { items: [{ ...floor, boundaryMm: [{ x: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }] }] }],
+    ["create_floors", { items: [{ ...floor, typeId: 56766 }] }],
+    ["create_floors", { items: [{ typeId: "1", levelId: "2" }] }],
+    ["create_floors", { items: batch(501, floor) }],
   ] as const) {
-    it(`rejects ${tool} ${JSON.stringify(args)} before it reaches Revit`, async (t) => {
+    it(`rejects ${tool} ${JSON.stringify(args).slice(0, 120)} before it reaches Revit`, async (t) => {
       const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, {}));
 
       const result = await client.callTool({ name: tool, arguments: args }).catch((error: unknown) => error);
@@ -196,6 +229,78 @@ describe("MCP tools", { timeout: 20_000 }, () => {
       assert.equal(bridge.frames.length, 0);
     });
   }
+
+  it("passes levels to create_levels with Cyrillic intact, and a plan unless told otherwise", async (t) => {
+    const answer = { committed: true, items: [], warnings: [], errors: [], dialogs: [] };
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
+
+    const result = await client.callTool({
+      name: "create_levels",
+      arguments: { items: [{ name: "Этаж 2", elevationMm: 3000.5 }, { name: "Чердак", elevationMm: -500, createPlan: false }] },
+    });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "create_levels");
+    assert.deepEqual(bridge.frames[0]?.params, {
+      items: [{ name: "Этаж 2", elevationMm: 3000.5, createPlan: true }, { name: "Чердак", elevationMm: -500, createPlan: false }],
+    });
+    assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
+  it("passes a wall with a height and a wall with a top level, with no offset unless told otherwise", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+
+    const result = await client.callTool({
+      name: "create_walls",
+      arguments: { items: [{ ...wall, heightMm: 2750.5 }, { ...wall, topLevelId: "3", baseOffsetMm: -300 }] },
+    });
+
+    assert.ok(!result.isError);
+    assert.deepEqual(bridge.frames[0]?.params, {
+      items: [{ ...wall, heightMm: 2750.5, baseOffsetMm: 0 }, { ...wall, topLevelId: "3", baseOffsetMm: -300 }],
+    });
+  });
+
+  it("passes a floor outline of the fewest points unchanged, and returns the honest result", async (t) => {
+    const answer = { committed: false, items: [{ index: 0, status: "failed", error: "Причина" }], warnings: [], errors: ["Причина"], dialogs: [] };
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
+
+    const result = await client.callTool({ name: "create_floors", arguments: { items: [floor] } });
+
+    assert.ok(!result.isError);
+    assert.deepEqual(bridge.frames[0]?.params, { items: [floor] });
+    assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
+  it("takes 500 items in a create_ tool, the most it allows", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+
+    const result = await client.callTool({ name: "create_floors", arguments: { items: batch(500, floor) } });
+
+    assert.ok(!result.isError);
+    assert.equal((bridge.frames[0]?.params["items"] as unknown[]).length, 500);
+  });
+
+  it("tells the model the truth about batches", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+
+    for (const name of ["create_levels", "create_walls", "create_floors"]) {
+      const description = listed.find((tool) => tool.name === name)?.description ?? "";
+
+      assert.match(description, /one Undo step/);
+      assert.match(description, /millimetres/);
+      assert.match(description, /500/);
+      for (const word of ["created", "failed", "rolled_back", "not attempted", "actual"]) {
+        assert.ok(description.includes(word), `${name} should explain ${word}`);
+      }
+    }
+
+    const levels = listed.find((tool) => tool.name === "create_levels")?.description ?? "";
+    assert.match(levels, /already_existed/);
+    assert.match(levels, /left as it is/);
+  });
 
   it("passes the ids of get_elements as strings", async (t) => {
     const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { elements: [], notFound: ["1"] }));

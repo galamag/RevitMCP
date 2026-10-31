@@ -38,6 +38,9 @@ public sealed class CommandRegistry
         new GetElementsCommand(),
         new Create3dViewCommand(),
         new GetViewSnapshotCommand(),
+        new CreateLevelsCommand(),
+        new CreateWallsCommand(),
+        new CreateFloorsCommand(),
     ]);
 
     /// <summary>Returns the command for this method, or <c>null</c>.</summary>

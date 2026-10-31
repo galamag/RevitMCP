@@ -14,6 +14,9 @@ public static class MethodNames
     public const string GetElements = "get_elements";
     public const string Create3dView = "create_3d_view";
     public const string GetViewSnapshot = "get_view_snapshot";
+    public const string CreateLevels = "create_levels";
+    public const string CreateWalls = "create_walls";
+    public const string CreateFloors = "create_floors";
 
     /// <summary>Every method the bridge accepts.</summary>
     public static readonly IReadOnlyList<string> All =
@@ -29,6 +32,9 @@ public static class MethodNames
         GetElements,
         Create3dView,
         GetViewSnapshot,
+        CreateLevels,
+        CreateWalls,
+        CreateFloors,
     ];
 
     /// <summary>Methods the socket thread answers itself, so they work while the Revit main thread is busy.</summary>

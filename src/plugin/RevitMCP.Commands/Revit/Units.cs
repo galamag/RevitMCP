@@ -15,6 +15,9 @@ public static class Units
     public static double InternalToMm(double value) =>
         UnitUtils.ConvertFromInternalUnits(value, UnitTypeId.Millimeters);
 
+    public static double InternalToSquareMetres(double value) =>
+        UnitUtils.ConvertFromInternalUnits(value, UnitTypeId.SquareMeters);
+
     public static double DegToRad(double degrees) =>
         UnitUtils.Convert(degrees, UnitTypeId.Degrees, UnitTypeId.Radians);
 
