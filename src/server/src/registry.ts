@@ -451,7 +451,7 @@ export const tools: readonly ToolDefinition[] = [
       "Returns { state, undoId, transactionName, createdIds, restoredIds, documentTitle, otherName, otherDocumentTitle }. state undone means Revit reported that undo, and the other keys mean what they mean there. " +
       "An empty createdIds does not prove that nothing was created: a step Revit redid after this plugin lost track of it is known by name only, so read the model when it matters. " +
       "not_confirmed means it was posted and Revit reported nothing, so treat the model as unchanged, and it is possible that Revit dropped the command. " +
-      "other means that while it waited Revit undid something else: otherName and otherDocumentTitle say what, createdIds and restoredIds are about that if known, and transactionName, what was asked for, is still in the model. " +
+      "other means that while it waited Revit undid something else: otherName and otherDocumentTitle say what, createdIds and restoredIds are about that if known, and transactionName, what was asked for, is probably still in the model, but this answer is final and a parked undo could still run later, so read the model first. " +
       "unknown means that a change could not be recorded while it waited, so it may have happened: read the model. " +
       "none means no undo was posted since Revit or the plugin last started, and the other keys are then empty. " +
       "An undo is reported as what it was asked to take. A change that a person undid in Revit is not an undo of these tools, so it does not show here. " +

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.UI;
 using RevitMCP.Bridge;
 
 namespace RevitMCP.Commands;
@@ -50,6 +51,17 @@ internal static class ProjectSupport
 
         return JsonSerializer.SerializeToElement(describe(document, TakeDialogs()), Options);
     }
+
+    /// <summary>
+    /// The document of what <c>OpenAndActivateDocument</c> returned. Live Revit returns null, and does not throw, when the
+    /// dialog guard refused a dialog of the open, such as the wait for a file another process holds. That is a failed
+    /// open, and the refused dialogs, which <see cref="Run"/> adds, say why.
+    /// </summary>
+    public static Document OpenedDocument(UIDocument? opened) =>
+        opened?.Document
+        ?? throw new RequestFailedException(
+            JsonRpcCodes.InternalError,
+            "Revit did not open the file, so it is not open and the active project did not change.");
 
     private static RequestFailedException WithDialogs(int code, string message)
     {

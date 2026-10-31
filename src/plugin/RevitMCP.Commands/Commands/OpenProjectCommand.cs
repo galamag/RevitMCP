@@ -32,7 +32,7 @@ public sealed class OpenProjectCommand : ICommand
 
         return ProjectSupport.Run(
             Method,
-            () => context.UiApp.OpenAndActivateDocument(path).Document,
+            () => ProjectSupport.OpenedDocument(context.UiApp.OpenAndActivateDocument(path)),
             (document, dialogs) => new
             {
                 name = document.Title,

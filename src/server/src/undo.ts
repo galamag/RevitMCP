@@ -97,7 +97,7 @@ async function post(client: BridgeCaller, timeoutMs: number | undefined): Promis
     answer = await client.call("undo_last_operation", {}, { timeoutMs });
   } catch (error) {
     if (error instanceof BridgeRequestPendingError) {
-      throw new UndoNotConfirmedError(`It is not known whether the undo was posted: ${error.message} ${FIND_OUT_AFTER_POST}`, { cause: error });
+      throw new UndoNotConfirmedError(`It is not known whether the undo was posted: ${error.message} ${FIND_OUT_AFTER_POST} ${LOOK_AT_REVIT}`, { cause: error });
     }
     throw error;
   }
@@ -116,7 +116,8 @@ function describeOther(result: UndoResult, posted: PostedUndo): string {
 
   return (
     `Revit undid '${result.otherName ?? "something unnamed"}' in '${result.otherDocumentTitle ?? "an unnamed project"}' instead of '${posted.transactionName}', so the model did change, and not as asked.${created}${restored} ` +
-    `'${posted.transactionName}' was not taken by that. Read the model with get_model_info and get_elements before you go on, and tell the user if the change may be theirs.`
+    `'${posted.transactionName}' was probably not taken by that and is probably still in the model, but this answer is final and a parked undo could still run later. ` +
+    "Read the model with get_model_info and get_elements first, before you go on, and tell the user if the change may be theirs."
   );
 }
 

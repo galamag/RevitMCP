@@ -398,6 +398,8 @@ describe("MCP tools", { timeout: 20_000 }, () => {
       assert.ok(description.includes(state), `should explain ${state}`);
     }
     assert.match(description, /otherName and otherDocumentTitle say what/);
+    assert.match(description, /probably still in the model/);
+    assert.match(description, /read the model first/);
   });
 
   it("takes 500 items in a create_ tool, the most it allows", async (t) => {

@@ -67,7 +67,7 @@ public sealed class CreateProjectCommand : ICommand
 
         try
         {
-            return app.OpenAndActivateDocument(path).Document;
+            return ProjectSupport.OpenedDocument(app.OpenAndActivateDocument(path));
         }
         catch (Exception e)
         {

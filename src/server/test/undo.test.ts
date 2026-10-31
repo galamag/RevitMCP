@@ -314,6 +314,18 @@ describe("undo_last_operation", { timeout: 20_000 }, () => {
     assert.match(textOf(result), /Do not call undo_last_operation again/);
     assert.match(textOf(result), /First see whether it was posted at all/);
     assert.match(textOf(result), /it describes an older one/);
+    assert.match(textOf(result), /ask the user to look at Revit/);
+  });
+
+  it("softens what it says about the asked-for step when Revit undid something else", async (t) => {
+    const other = { ...undone, state: "other", otherName: "Wall", otherDocumentTitle: "Другой", createdIds: [], restoredIds: [] };
+    const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, other)));
+
+    const result = await undo(client);
+
+    assert.match(textOf(result), /probably still in the model/);
+    assert.match(textOf(result), /parked undo could still run later/);
+    assert.doesNotMatch(textOf(result), /was not taken by that\./);
   });
 
   it("throws a refusal as the plugin error, and an unconfirmed undo as its own error", async (t) => {
