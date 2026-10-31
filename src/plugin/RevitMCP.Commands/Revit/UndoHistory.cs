@@ -2,8 +2,7 @@ namespace RevitMCP.Commands;
 
 /// <summary>
 /// One step of a document's undo history as the events reported it. <paramref name="CreatedIds"/> and
-/// <paramref name="DeletedIds"/> are empty when the step was only seen being redone, as that event does not carry them
-/// for a step the history lost track of.
+/// <paramref name="DeletedIds"/> stay empty for a step the history lost track of and saw again only by its name.
 /// </summary>
 internal sealed record UndoStep(
     string Name,

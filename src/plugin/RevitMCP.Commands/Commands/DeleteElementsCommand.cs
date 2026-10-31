@@ -59,15 +59,17 @@ public sealed class DeleteElementsCommand : ICommand
 
     private static string Summarize(bool dryRun, bool passed, int count) => (dryRun, passed) switch
     {
-        (true, true) => $"Dry run: nothing was deleted, and a real delete would take {count} elements. Pass dryRun false to delete.",
+        (true, true) => $"Dry run: nothing was deleted. Elements a real delete would take: {count}. Pass dryRun false to delete.",
         (true, false) => "Dry run: nothing was deleted, and Revit refused the delete, see errors. A real delete would be refused too.",
-        (false, true) => $"Deleted {count} elements as one Undo step.",
+        (false, true) => $"Elements deleted: {count}, as one Undo step.",
         (false, false) => "Nothing was deleted: Revit rolled the delete back, see errors.",
     };
 
     /// <summary>
     /// All of it is read before the transaction opens, so a refusal keeps its code and nothing is half done. Revit would
-    /// throw on the same cases, but only with one sentence about the whole list, while this names the ids.
+    /// throw on the same cases, but only with one sentence about the whole list, while this names the ids. Live Revit:
+    /// each id can pass here and the list still fail in <see cref="Document.Delete(ICollection{ElementId})"/>, as every
+    /// wall type at once does, so that failure stays possible and lands in the errors of the outcome.
     /// </summary>
     private List<ElementId> ReadIds(Document document, JsonElement parameters)
     {
@@ -86,7 +88,7 @@ public sealed class DeleteElementsCommand : ICommand
         {
             throw new RequestFailedException(
                 JsonRpcCodes.InvalidParams,
-                $"{Method}: Revit cannot delete {string.Join(", ", undeletable)}, so nothing was deleted. The project needs them.");
+                $"{Method}: Revit cannot delete {string.Join(", ", undeletable)}, so nothing was deleted. It refuses this for the view open in its window, for the level of that view, and for its own internal elements.");
         }
 
         return ids;

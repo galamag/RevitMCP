@@ -367,6 +367,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /A level takes the walls, floors and views on it/);
     assert.match(description, /In a dry run committed is always false, which is no failure/);
     assert.match(description, /committed false means nothing was deleted/);
+    assert.match(description, /each id can pass and the list still be refused/);
   });
 
   it("tells the model the truth about undo_last_operation", async (t) => {

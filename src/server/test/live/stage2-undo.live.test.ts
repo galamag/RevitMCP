@@ -102,6 +102,9 @@ const WALL_HEIGHT_MM = 2500;
 /** The sum of these must stay under the 120 s a test may take, twice over. */
 const QUIET_PAUSES_MS = [5_000, 15_000, 30_000];
 
+/** In a Revit that ran no other test this project is all there is, and otherwise earlier projects hold the last operation. */
+const NOTHING_HERE = /nothing to undo|lies in/;
+
 const stamp = new Date().toTimeString().slice(0, 8).replaceAll(":", "");
 const name = `проверка-задача13-${stamp}`;
 const testFolder = path.join(homedir(), "Documents", "RevitMCP");
@@ -245,7 +248,7 @@ describe("stage 2 live checks: delete and undo", { timeout: 120_000 }, () => {
       const refused = await undoRefusal(client);
 
       console.log(`# refusal: ${refused.message}`);
-      assert.match(refused.message, /nothing to undo/i);
+      assert.match(refused.message, NOTHING_HERE);
       assert.deepEqual(await modelInfo(client), before);
     });
   });
@@ -353,29 +356,46 @@ describe("stage 2 live checks: delete and undo", { timeout: 120_000 }, () => {
     });
   });
 
-  it("a real delete of what Revit cannot delete changes nothing and says so", async () => {
+  it("delete refuses what Revit cannot delete, by id", async () => {
     await withClient(async (client) => {
-      const info = await modelInfo(client);
-      const levelIds = info.levels.map((level) => level.id);
+      const { ground } = ctx();
+      const before = await modelInfo(client);
 
-      // Every level at once takes every plan with it, the active view among them.
-      const dry = await remove(client, { ids: levelIds, dryRun: true });
-      console.log(`# dry run of every level: committed ${dry.committed}, ${dry.allAffected.length} affected, errors ${JSON.stringify(dry.errors)}`);
-      const real = await remove(client, { ids: levelIds, dryRun: false });
-      console.log(`# real delete of every level: committed ${real.committed}, summary ${real.summary}, errors ${JSON.stringify(real.errors)}, dialogs ${JSON.stringify(real.dialogs)}`);
+      // In the template the ground plan is the view Revit opens with, and that makes its level impossible to delete too.
+      const refused = await refusal(client, "delete_elements", { ids: [ground.id], dryRun: false });
 
-      if (!real.committed) {
-        assert.deepEqual(real.allAffected, []);
-        assert.match(real.summary, /nothing was deleted/i);
-        assert.ok(real.errors.length > 0);
-        assert.deepEqual((await modelInfo(client)).levels, info.levels);
-        return;
+      console.log(`# refusal: ${refused.message}`);
+      assert.equal(refused.code, INVALID_PARAMS);
+      assert.ok(refused.message.includes(ground.id));
+      assert.match(refused.message, /nothing was deleted/);
+      assert.deepEqual(await modelInfo(client), before);
+    });
+  });
+
+  it("a list that passes the check and that Revit still refuses leaves nothing and says so", async () => {
+    await withClient(async (client) => {
+      const walls = await createWalls(client, 1);
+      const before = await modelInfo(client);
+      const types = (await client.call("list_types", { category: "walls" })) as TypeRow[];
+      const ids = types.map((type) => type.id);
+
+      const dry = await remove(client, { ids, dryRun: true });
+      const real = await remove(client, { ids, dryRun: false });
+
+      console.log(`# every wall type, for real: ${JSON.stringify(real)}`);
+      for (const result of [dry, real]) {
+        assert.equal(result.committed, false);
+        assert.deepEqual(result.allAffected, []);
+        assert.deepEqual(result.dependents, []);
+        assert.ok(result.errors.length > 0, "the reason is in errors");
+        assert.match(result.summary, /nothing was deleted/i);
       }
+      assert.deepEqual(await modelInfo(client), before);
+      assert.deepEqual(((await client.call("list_types", { category: "walls" })) as TypeRow[]).length, types.length);
 
-      // Revit took it, so the undo below is what restores the project for the tests after this one.
-      const restored = await undo(client, "delete_elements");
-      assert.ok(restored.restoredIds.length >= levelIds.length);
-      assert.deepEqual((await modelInfo(client)).levels, info.levels);
+      // A rollback is no Undo step.
+      await undo(client, "create_walls");
+      await assertGone(client, walls);
     });
   });
 
@@ -622,6 +642,7 @@ describe("stage 2 live checks: delete and undo", { timeout: 120_000 }, () => {
       const refused = await undoRefusal(client);
 
       console.log(`# refusal: ${refused.message}`);
+      assert.match(refused.message, NOTHING_HERE);
       await client.call("open_project", { name });
     });
   });
