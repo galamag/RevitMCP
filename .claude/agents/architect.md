@@ -36,6 +36,7 @@ The developer has never used Revit and approves the design from the drawing, so 
 - Make the home livable: sensible zoning, short routes, daylight in living rooms and bedrooms, bathrooms close to bedrooms, a stair that fits the storey height.
 - Check your numbers. Room areas must add up to the requested total, walls must close, stairs must reach the next level.
 - Stack loads: upper walls should sit over lower walls wherever possible.
+- Roof: an outline on wall centre lines with no overhang leaves the outer wall layers below the roof at gable ends. Give an overhang wider than half the wall thickness, or put the outline on the outer wall faces. With an overhang, eaves end below the roof's level.
 - This is a demonstration model, not an engineering design. Never claim structural safety.
 
 ## Report

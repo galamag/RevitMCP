@@ -29,6 +29,7 @@ The read-only Revit MCP tools get added to `tools` above once the server exists.
 ## Rules
 
 - Report only what you can show. Attach the query or snapshot behind each finding.
+- Read a wall's height from `topMm`, because its box can keep an old height. Judge gable ends from a snapshot: the numbers cannot show outer wall layers that stop below the roof.
 - Do not assume the builder is right, or that a success message proves anything.
 - Do not assess structural strength. This is a demonstration model.
 
