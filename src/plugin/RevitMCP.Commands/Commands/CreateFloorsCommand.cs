@@ -11,8 +11,6 @@ namespace RevitMCP.Commands;
 /// </summary>
 public sealed class CreateFloorsCommand : ICommand
 {
-    private const int MinPoints = 3;
-
     public string Method => MethodNames.CreateFloors;
 
     public bool NeedsDocument => true;
@@ -38,39 +36,7 @@ public sealed class CreateFloorsCommand : ICommand
         var typeId = reader.Type<FloorType>(document, "typeId", "floors");
         var level = reader.Level(document, "levelId");
 
-        return new BatchEntry<FloorInput>(index, item, new FloorInput(ReadOutline(document, reader, level), typeId, level.Id));
-    }
-
-    private static CurveLoop ReadOutline(Document document, ItemReader reader, Level level)
-    {
-        if (!reader.Item.TryGetProperty("boundaryMm", out var boundary) || boundary.ValueKind != JsonValueKind.Array || boundary.GetArrayLength() < MinPoints)
-        {
-            throw reader.Refuse($"boundaryMm must be a list of at least {MinPoints} points.");
-        }
-
-        var elevationMm = Units.InternalToMm(level.ProjectElevation);
-        var points = boundary.EnumerateArray()
-            .Select(point => reader.Point("boundaryMm", point))
-            .Select(point => Units.PointMm(point.X, point.Y, elevationMm))
-            .ToList();
-
-        var shortest = document.Application.ShortCurveTolerance;
-        var outline = new CurveLoop();
-        for (var index = 0; index < points.Count; index++)
-        {
-            var next = (index + 1) % points.Count;
-            if (points[index].DistanceTo(points[next]) < shortest)
-            {
-                throw reader.Refuse(
-                    $"boundaryMm points {index} and {next} are closer than the {Units.InternalToMm(shortest):0.###} mm Revit can draw. The outline closes by itself, so do not repeat the first point.");
-            }
-
-            outline.Append(Line.CreateBound(points[index], points[next]));
-        }
-
-        return BoundaryValidation.IsValidHorizontalBoundary([outline])
-            ? outline
-            : throw reader.Refuse("Revit does not take boundaryMm as an outline: it must enclose an area, and its edges must not cross or touch.");
+        return new BatchEntry<FloorInput>(index, item, new FloorInput(reader.Outline(document, "boundaryMm", level), typeId, level.Id));
     }
 
     private static object Describe(Floor floor)

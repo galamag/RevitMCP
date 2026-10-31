@@ -21,6 +21,9 @@ public static class Units
     public static double DegToRad(double degrees) =>
         UnitUtils.Convert(degrees, UnitTypeId.Degrees, UnitTypeId.Radians);
 
+    public static double RadToDeg(double radians) =>
+        UnitUtils.Convert(radians, UnitTypeId.Radians, UnitTypeId.Degrees);
+
     public static XYZ PointMm(double x, double y, double z = 0) =>
         new(MmToInternal(x), MmToInternal(y), MmToInternal(z));
 }

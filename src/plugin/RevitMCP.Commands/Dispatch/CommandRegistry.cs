@@ -41,6 +41,8 @@ public sealed class CommandRegistry
         new CreateLevelsCommand(),
         new CreateWallsCommand(),
         new CreateFloorsCommand(),
+        new CreateRoofCommand(),
+        new AttachWallsCommand(),
     ]);
 
     /// <summary>Returns the command for this method, or <c>null</c>.</summary>

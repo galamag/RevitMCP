@@ -17,6 +17,8 @@ public static class MethodNames
     public const string CreateLevels = "create_levels";
     public const string CreateWalls = "create_walls";
     public const string CreateFloors = "create_floors";
+    public const string CreateRoof = "create_roof";
+    public const string AttachWalls = "attach_walls";
 
     /// <summary>Every method the bridge accepts.</summary>
     public static readonly IReadOnlyList<string> All =
@@ -35,6 +37,8 @@ public static class MethodNames
         CreateLevels,
         CreateWalls,
         CreateFloors,
+        CreateRoof,
+        AttachWalls,
     ];
 
     /// <summary>Methods the socket thread answers itself, so they work while the Revit main thread is busy.</summary>

@@ -44,6 +44,13 @@ function textOf(result: unknown): string {
 
 const wall = { startMm: { x: 0, y: 0 }, endMm: { x: 6000.5, y: 0 }, typeId: "1", levelId: "2" };
 const floor = { boundaryMm: [{ x: 0, y: 0 }, { x: 6000, y: 0 }, { x: 6000, y: 4000 }], typeId: "1", levelId: "2" };
+const roof = {
+  outlineMm: [{ x: 0, y: 0 }, { x: 6000, y: 0 }, { x: 6000, y: 4000 }, { x: 0, y: 4000 }],
+  levelId: "2",
+  typeId: "1",
+  edgeSlopesDeg: [30, null, 30.5, null],
+};
+const attachment = { wallId: "10", roofId: "20" };
 const batch = <T>(length: number, item: T): T[] => Array.from({ length }, () => item);
 
 describe("MCP tools", { timeout: 20_000 }, () => {
@@ -55,11 +62,13 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.deepEqual(
       tools.map((tool) => tool.name).sort(),
       [
+        "attach_walls",
         "cancel_request",
         "create_3d_view",
         "create_floors",
         "create_levels",
         "create_project",
+        "create_roof",
         "create_walls",
         "get_elements",
         "get_model_info",
@@ -218,6 +227,28 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["create_floors", { items: [{ ...floor, typeId: 56766 }] }],
     ["create_floors", { items: [{ typeId: "1", levelId: "2" }] }],
     ["create_floors", { items: batch(501, floor) }],
+    ["create_roof", {}],
+    ["create_roof", { items: [] }],
+    ["create_roof", { items: batch(501, roof) }],
+    ["create_roof", { items: [{ ...roof, edgeSlopesDeg: [30, null, 30] }] }],
+    ["create_roof", { items: [{ ...roof, edgeSlopesDeg: [30, null, 30, null, 30] }] }],
+    ["create_roof", { items: [{ ...roof, edgeSlopesDeg: [null, null, null, null] }] }],
+    ["create_roof", { items: [{ ...roof, edgeSlopesDeg: [0, null, 30, null] }] }],
+    ["create_roof", { items: [{ ...roof, edgeSlopesDeg: [-30, null, 30, null] }] }],
+    ["create_roof", { items: [{ ...roof, edgeSlopesDeg: [90, null, 30, null] }] }],
+    ["create_roof", { items: [{ ...roof, edgeSlopesDeg: ["30", null, 30, null] }] }],
+    ["create_roof", { items: [{ ...roof, overhangMm: -1 }] }],
+    ["create_roof", { items: [{ ...roof, outlineMm: roof.outlineMm.slice(0, 2), edgeSlopesDeg: [30, null] }] }],
+    ["create_roof", { items: [{ ...roof, typeId: 56766 }] }],
+    ["create_roof", { items: [{ ...roof, levelId: "" }] }],
+    ["create_roof", { items: [{ ...roof, slopes: [30] }] }],
+    ["attach_walls", {}],
+    ["attach_walls", { items: [] }],
+    ["attach_walls", { items: batch(501, attachment) }],
+    ["attach_walls", { items: [{ wallId: "10" }] }],
+    ["attach_walls", { items: [{ roofId: "20" }] }],
+    ["attach_walls", { items: [{ wallId: 10, roofId: "20" }] }],
+    ["attach_walls", { items: [{ ...attachment, top: true }] }],
   ] as const) {
     it(`rejects ${tool} ${JSON.stringify(args).slice(0, 120)} before it reaches Revit`, async (t) => {
       const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, {}));
@@ -272,6 +303,28 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.deepEqual(JSON.parse(textOf(result)), answer);
   });
 
+  it("passes a roof with no overhang unless told otherwise, with null slopes kept in their places", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+
+    const result = await client.callTool({ name: "create_roof", arguments: { items: [roof, { ...roof, overhangMm: 600.5 }] } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "create_roof");
+    assert.deepEqual(bridge.frames[0]?.params, { items: [{ ...roof, overhangMm: 0 }, { ...roof, overhangMm: 600.5 }] });
+  });
+
+  it("passes attachments unchanged and returns the honest result", async (t) => {
+    const answer = { committed: true, items: [{ index: 0, status: "already_existed", elementId: "10" }], warnings: [], errors: [], dialogs: [] };
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
+
+    const result = await client.callTool({ name: "attach_walls", arguments: { items: [attachment] } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "attach_walls");
+    assert.deepEqual(bridge.frames[0]?.params, { items: [attachment] });
+    assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
   it("takes 500 items in a create_ tool, the most it allows", async (t) => {
     const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
 
@@ -286,7 +339,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
 
     const { tools: listed } = await client.listTools();
 
-    for (const name of ["create_levels", "create_walls", "create_floors"]) {
+    for (const name of ["create_levels", "create_walls", "create_floors", "create_roof", "attach_walls"]) {
       const description = listed.find((tool) => tool.name === name)?.description ?? "";
 
       assert.match(description, /one Undo step/);
@@ -300,6 +353,33 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     const levels = listed.find((tool) => tool.name === "create_levels")?.description ?? "";
     assert.match(levels, /already_existed/);
     assert.match(levels, /left as it is/);
+  });
+
+  it("tells the model the truth about roof edges and overhangs", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "create_roof")?.description ?? "";
+
+    assert.match(description, /Edge 0 runs from point 0 to point 1/);
+    assert.match(description, /a slope stays on the edge it is listed for/);
+    assert.match(description, /\[30, 30, 30, 30\]/);
+    assert.match(description, /\[30, null, 30, null\]/);
+    assert.match(description, /the outline is the eaves/);
+    assert.match(description, /eave ends below the level/);
+    assert.match(description, /attach_walls/);
+  });
+
+  it("tells the model what the statuses of attach_walls mean", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "attach_walls")?.description ?? "";
+
+    assert.match(description, /created means a new attachment/);
+    assert.match(description, /already_existed means that wall was attached to that roof before/);
+    assert.match(description, /misses the target/);
+    assert.match(description, /elementId is the id of the wall/);
   });
 
   it("passes the ids of get_elements as strings", async (t) => {

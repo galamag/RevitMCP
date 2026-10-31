@@ -33,8 +33,11 @@ const MAX_SUN_ALTITUDE_DEG = 90;
 /** The most items one create_ call takes, which the plugin checks too. */
 const MAX_BATCH_ITEMS = 500;
 
-/** The fewest points of a floor outline, which the plugin checks too. */
+/** The fewest points of an outline, which the plugin checks too. */
 const MIN_OUTLINE_POINTS = 3;
+
+/** A roof slope stays below this, in degrees, which the plugin checks too. */
+const MAX_ROOF_SLOPE_DEG = 90;
 
 const requestId = z
   .string()
@@ -327,6 +330,74 @@ export const tools: readonly ToolDefinition[] = [
           boundaryMm: z.array(planPoint("A corner of the outline")).min(MIN_OUTLINE_POINTS).describe(`The corners of the outline, at least ${MIN_OUTLINE_POINTS}. It closes by itself.`),
           typeId: elementId("The id of a floor type from list_types"),
           levelId: elementId("The id of the level the floor lies on"),
+        }),
+      ),
+    },
+  },
+  {
+    name: "create_roof",
+    description:
+      "Creates footprint roofs in the active project from outlines of straight edges. outlineMm lists the corners in " +
+      "millimetres in model coordinates, in either direction. The outline closes by itself from the last point to the " +
+      `first, so do not repeat the first point: equal neighbouring points are refused. It needs at least ${MIN_OUTLINE_POINTS} points, ` +
+      "and an outline that crosses or touches itself, or encloses no area, is refused. Edge 0 runs from point 0 to point 1, edge 1 from point 1 to point 2, " +
+      "and the last edge from the last point back to point 0. edgeSlopesDeg has one entry per edge in that same order, so as many entries as points. " +
+      `A number of degrees, above 0 and below ${MAX_ROOF_SLOPE_DEG}, makes the roof rise inwards from that edge at that angle, and null gives that edge no slope. ` +
+      "At least one edge needs a slope, as a roof with none would be flat, and that is refused. The direction of the outline and the corner it starts from change nothing: " +
+      "a slope stays on the edge it is listed for. How to build the usual roofs, for a rectangle listed south, east, north, west: a hip roof has a slope on every edge, [30, 30, 30, 30]. " +
+      "A gable roof has slopes on two opposite edges and null on the other two, so [30, null, 30, null] has a ridge running east to west and gable ends on the east and west sides. " +
+      "A shed roof has one slope, so [30, null, null, null] rises from the south edge and is highest over the north edge. Slopes may differ. " +
+      "Take typeId from list_types with roofs and levelId from get_model_info. Put the roof on the level at the top of the walls: without an overhang the outline is the eaves, " +
+      "where the underside of the roof meets the level, and the thickness of the type goes up from there. overhangMm, 0 by default, moves every edge out by that distance, edges without a slope too. " +
+      "Each slope carries on down to the moved edge, so the eave ends below the level by overhangMm times the tangent of its slope, and above the outline the roof stays exactly as it is without an overhang. " +
+      "So draw the outline along the walls and let overhangMm make the eaves. An overhang too big for the outline, such as one that closes a notch, is refused. " +
+      "This tool changes no wall, so the triangle under a gable stays open until attach_walls raises the walls to the roof. Only what lies under the roof can rise, so an outline along the centre lines of walls leaves their outer half low: " +
+      "use an overhang wider than half the wall, or an outline along the outer faces. A roof Revit cannot build, such as one too high for the model, fails at the end with Can't make footprint roof. in errors. " +
+      "actual is { edges, typeId, levelId, boundingBoxMm }. edges has one entry per edge, in the order of outlineMm, read back from the roof: { startMm, endMm, definesSlope, slopeDeg, eaveOffsetMm }. " +
+      "startMm and endMm are where that eave really is, so the outline moved out by the overhang. slopeDeg is null on an edge without a slope. eaveOffsetMm is the height of that eave above the level, negative below it. " +
+      "boundingBoxMm is { min, max } in millimetres, and its top includes the thickness of the roof. " +
+      BATCH_RULES +
+      " Related tools: list_types, get_model_info, get_elements, attach_walls, create_walls, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z
+          .strictObject({
+            outlineMm: z.array(planPoint("A corner of the outline")).min(MIN_OUTLINE_POINTS).describe(`The corners of the outline, at least ${MIN_OUTLINE_POINTS}. It closes by itself. Edge N starts at point N.`),
+            levelId: elementId("The id of the level the eaves sit on"),
+            typeId: elementId("The id of a roof type from list_types"),
+            overhangMm: z.number().min(0).default(0).describe("How far every edge moves out from the outline, in millimetres."),
+            edgeSlopesDeg: z
+              .array(z.number().gt(0).lt(MAX_ROOF_SLOPE_DEG).nullable())
+              .describe(`One entry per edge, in the order of the outline: degrees above 0 and below ${MAX_ROOF_SLOPE_DEG}, or null for no slope.`),
+          })
+          .refine((item) => item.edgeSlopesDeg.length === item.outlineMm.length, {
+            message: "edgeSlopesDeg needs one entry per edge, so as many entries as outlineMm has points.",
+          })
+          .refine((item) => item.edgeSlopesDeg.some((slope) => slope !== null), {
+            message: "edgeSlopesDeg needs a slope on at least one edge.",
+          }),
+      ),
+    },
+  },
+  {
+    name: "attach_walls",
+    description:
+      "Attaches the tops of walls to a roof, so that each wall follows the underside of the roof. A wall below the roof rises to it, which is what fills the gable ends of a gable roof, " +
+      "and a wall that reaches above the roof is cut down to it. Take wallId from create_walls and roofId from create_roof. No element is created, so elementId is the id of the wall, and the status is about the attachment: " +
+      "here created means a new attachment, so the wall already existed. already_existed means that wall was attached to that roof before: nothing changes, and when every item is like that no Undo step is added. " +
+      "already_existed still stands when the batch fails. The same wall and roof twice in one list is refused. A wall may attach to several roofs, each as its own item, as when it runs under two of them. " +
+      "A wall that does not meet the roof still attaches and comes back created, but it does not change, and warnings at the top says that it misses the target, so compare topMm. " +
+      "A wall that stands above the whole roof cannot follow it, as its top would fall below its foot: the batch then fails at the end with Revit's reason in errors. " +
+      "Only the part of a wall under the roof can rise, so an outline along the centre lines of the walls leaves their outer half low, see create_roof. " +
+      "actual is { attachedToIds, topMm }: attachedToIds lists every element the top of the wall is attached to, and topMm is the highest point of the real shape of the wall, in millimetres in model coordinates. " +
+      "Read topMm and not get_elements, whose box still shows the old height of a wall that was cut down to a roof. " +
+      BATCH_RULES +
+      " Related tools: create_roof, create_walls, get_elements, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.strictObject({
+          wallId: elementId("The id of the wall"),
+          roofId: elementId("The id of the roof its top attaches to"),
         }),
       ),
     },

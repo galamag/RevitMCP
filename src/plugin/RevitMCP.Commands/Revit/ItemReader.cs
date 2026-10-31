@@ -13,8 +13,11 @@ internal readonly record struct PlanPointMm(double X, double Y);
 /// </summary>
 internal readonly record struct ItemReader(JsonElement Item, string Where)
 {
-    /// <summary>The most types a refusal lists, so a project with hundreds of them does not bury the message.</summary>
-    private const int MaxListedTypes = 50;
+    /// <summary>The most choices a refusal lists, so a project with hundreds of them does not bury the message.</summary>
+    private const int MaxListed = 50;
+
+    /// <summary>The fewest points of an outline, which <c>registry.ts</c> states too.</summary>
+    private const int MinOutlinePoints = 3;
 
     public RequestFailedException Refuse(string problem) => new(JsonRpcCodes.InvalidParams, $"{Where}: {problem}");
 
@@ -27,6 +30,8 @@ internal readonly record struct ItemReader(JsonElement Item, string Where)
 
     public double Number(string key) =>
         Item.TryGetProperty(key, out var value) ? Finite(key, value) : throw Refuse($"{key} must be a number.");
+
+    public double Number(string key, JsonElement value) => Finite(key, value);
 
     public double NumberOr(string key, double fallback) => Has(key) ? Number(key) : fallback;
 
@@ -56,6 +61,45 @@ internal readonly record struct ItemReader(JsonElement Item, string Where)
         && point.TryGetProperty("y", out var y)
             ? new PlanPointMm(Finite($"{key}.x", x), Finite($"{key}.y", y))
             : throw Refuse($"{key} must be a point with x and y in millimetres.");
+
+    /// <summary>
+    /// Reads an outline of straight edges, in the order given, at the height of <paramref name="level"/>. It closes by
+    /// itself, from the last point back to the first, so a first point repeated at the end is two equal neighbours, and
+    /// that is refused.
+    /// </summary>
+    public CurveLoop Outline(Document document, string key, Level level)
+    {
+        if (!Item.TryGetProperty(key, out var outline) || outline.ValueKind != JsonValueKind.Array || outline.GetArrayLength() < MinOutlinePoints)
+        {
+            throw Refuse($"{key} must be a list of at least {MinOutlinePoints} points.");
+        }
+
+        var elevationMm = Units.InternalToMm(level.ProjectElevation);
+        var points = new List<XYZ>();
+        foreach (var corner in outline.EnumerateArray())
+        {
+            var point = Point(key, corner);
+            points.Add(Units.PointMm(point.X, point.Y, elevationMm));
+        }
+
+        var shortest = document.Application.ShortCurveTolerance;
+        var loop = new CurveLoop();
+        for (var index = 0; index < points.Count; index++)
+        {
+            var next = (index + 1) % points.Count;
+            if (points[index].DistanceTo(points[next]) < shortest)
+            {
+                throw Refuse(
+                    $"{key} points {index} and {next} are closer than the {Units.InternalToMm(shortest):0.###} mm Revit can draw. The outline closes by itself, so do not repeat the first point.");
+            }
+
+            loop.Append(Line.CreateBound(points[index], points[next]));
+        }
+
+        return BoundaryValidation.IsValidHorizontalBoundary([loop])
+            ? loop
+            : throw Refuse($"Revit does not take {key} as an outline: it must enclose an area, and its edges must not cross or touch.");
+    }
 
     /// <summary>Reads a level by ID, as <c>get_model_info</c> lists them.</summary>
     public Level Level(Document document, string key)
@@ -100,14 +144,39 @@ internal readonly record struct ItemReader(JsonElement Item, string Where)
             .Select(type => $"{type.Id} ('{type.FamilyName}: {type.Name}')")
             .ToList();
 
-        var listed = valid.Count == 0
-            ? "none"
-            : string.Join(", ", valid.Take(MaxListedTypes)) + (valid.Count > MaxListedTypes ? $", and {valid.Count - MaxListedTypes} more, see list_types" : string.Empty);
-
         throw Refuse(
             $"{key} {Item.GetProperty(key).GetRawText()} is not a type of {category}. "
-            + $"The types of {category} in this project: {listed}.");
+            + $"The types of {category} in this project: {Listing(valid, ", see list_types")}.");
     }
+
+    /// <summary>Reads an element of the model by ID, with the same <paramref name="category"/> word as <c>list_types</c>.</summary>
+    public T Instance<T>(Document document, string key, string category)
+        where T : Element
+    {
+        if (!CategoryMap.TryFind(category, out var builtIn))
+        {
+            throw new ArgumentException($"'{category}' is not a category word.", nameof(category));
+        }
+
+        if (ElementIds.TryParse(ReadId(key), out var id) && document.GetElement(id) is T { Category: { } found } element && found.BuiltInCategory == builtIn)
+        {
+            return element;
+        }
+
+        var valid = new FilteredElementCollector(document)
+            .OfCategory(builtIn)
+            .WhereElementIsNotElementType()
+            .OfType<T>()
+            .Select(instance => instance.Id.ToString())
+            .ToList();
+
+        throw Refuse($"{key} {Item.GetProperty(key).GetRawText()} is not one of the {category} of this model. Its {category}: {Listing(valid)}.");
+    }
+
+    private static string Listing(List<string> valid, string hint = "") =>
+        valid.Count == 0
+            ? "none"
+            : string.Join(", ", valid.Take(MaxListed)) + (valid.Count > MaxListed ? $", and {valid.Count - MaxListed} more{hint}" : string.Empty);
 
     private string ReadId(string key) =>
         Item.TryGetProperty(key, out var id) && id.ValueKind == JsonValueKind.String
