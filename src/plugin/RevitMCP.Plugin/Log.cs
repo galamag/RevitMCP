@@ -6,6 +6,8 @@ namespace RevitMCP.Plugin;
 /// </summary>
 public static class Log
 {
+    private const int MaxCleanLength = 64;
+
     private static readonly object Gate = new();
 
     private static readonly string FilePath = Path.Combine(
@@ -13,16 +15,25 @@ public static class Log
         "RevitMCP",
         "plugin.log");
 
-    public static void Info(string message) => Write("INFO", message);
+    public static void Info(string message) => Write("INFO", message, null);
 
-    public static void Error(string message, Exception? exception = null) =>
-        Write("ERROR", exception is null ? message : $"{message}{Environment.NewLine}{exception}");
+    public static void Error(string message, Exception? exception = null) => Write("ERROR", message, exception);
 
-    private static void Write(string level, string message)
+    /// <summary>
+    /// Makes text a client chose safe for one log line: at most 64 characters, with control characters replaced.
+    /// Surrogates go too, because a cut can split a pair, and writing half a pair throws and loses the line.
+    /// </summary>
+    public static string Clean(string text) => string.Concat(
+        text.Take(MaxCleanLength).Select(c => char.IsControl(c) || char.IsSurrogate(c) ? '?' : c));
+
+    private static void Write(string level, string message, Exception? exception)
     {
-        var line = $"{DateTimeOffset.Now:O} [{Environment.ProcessId}] {level} {message}{Environment.NewLine}";
         try
         {
+            // Inside the try: formatting calls the exception's ToString, which can throw.
+            var text = exception is null ? message : $"{message}{Environment.NewLine}{exception}";
+            var line = $"{DateTimeOffset.Now:O} [{Environment.ProcessId}] {level} {text}{Environment.NewLine}";
+
             lock (Gate)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);

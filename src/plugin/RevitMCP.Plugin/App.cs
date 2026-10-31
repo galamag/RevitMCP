@@ -16,12 +16,15 @@ public sealed class App : IExternalApplication
 
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(5);
 
+    private static readonly TimeSpan DrainInterval = TimeSpan.FromSeconds(1);
+
     private static readonly string ConnectionPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "RevitMCP",
         "connection.json");
 
     private BridgeServer? _server;
+    private Timer? _drainTimer;
 
     public Result OnStartup(UIControlledApplication application)
     {
@@ -50,6 +53,8 @@ public sealed class App : IExternalApplication
     /// </summary>
     private void TearDown()
     {
+        _drainTimer?.Dispose();
+
         try
         {
             StopBridge();
@@ -87,6 +92,9 @@ public sealed class App : IExternalApplication
         _server = new BridgeServer(token, queue, new RequestStore(Limits.ResultCapacity), signal, clock);
         var port = _server.StartAsync().GetAwaiter().GetResult();
         ConnectionFile.Write(ConnectionPath, new ConnectionInfo(port, token, Environment.ProcessId, BridgeServer.ProtocolVersion));
+
+        // The fallback for signals Revit left unserved or refused. It runs off the main thread, see SignalIfQueued.
+        _drainTimer = new Timer(_ => handler.SignalIfQueued(), null, DrainInterval, DrainInterval);
 
         Log.Info($"The bridge listens on 127.0.0.1:{port}, protocol version {BridgeServer.ProtocolVersion}.");
     }

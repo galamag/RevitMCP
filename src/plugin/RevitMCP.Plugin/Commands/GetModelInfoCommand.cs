@@ -8,23 +8,26 @@ namespace RevitMCP.Plugin.Commands;
 /// <summary>
 /// Describes the active document and lists every open one. IDs are strings and elevations are millimetres.
 /// Names may be localized, so <c>viewType</c> and <c>category</c> are the stable values to match on.
+/// Works with no active document, since clients ask this to learn what is open: <c>activeDocument</c> is then
+/// null and <c>levels</c>, <c>views</c> and <c>categoryCounts</c> are empty, and all five keys are always present.
 /// </summary>
 public sealed class GetModelInfoCommand : ICommand
 {
     public string Method => MethodNames.GetModelInfo;
 
-    public bool NeedsDocument => true;
+    public bool NeedsDocument => false;
 
     public JsonElement Execute(CommandContext context, JsonElement parameters)
     {
-        var document = context.Document!;
+        var document = context.Document;
+        var none = Array.Empty<object>();
 
         return JsonSerializer.SerializeToElement(new
         {
-            activeDocument = Describe(document),
-            levels = ListLevels(document),
-            views = ListViews(document),
-            categoryCounts = CountByCategory(document),
+            activeDocument = document is null ? null : Describe(document),
+            levels = document is null ? none : ListLevels(document),
+            views = document is null ? none : ListViews(document),
+            categoryCounts = document is null ? none : CountByCategory(document),
             openDocuments = context.UiApp.Application.Documents.Cast<Document>().Select(Describe).ToList(),
         });
     }
