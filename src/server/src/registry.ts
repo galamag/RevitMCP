@@ -246,8 +246,9 @@ export const tools: readonly ToolDefinition[] = [
       "viewName, path, dialogs, sizeBytes }. It does not change the model. Take viewId from get_model_info or " +
       "create_3d_view; the view need not be open. Plans, sections, elevations, 3D views, sheets, drafting views and " +
       "legends can be exported. Schedules and other tables cannot, and are refused, like an id that is no view. " +
-      "A refused id lists the views that can be used. Files stay in %LOCALAPPDATA%\\RevitMCP\\snapshots and each " +
-      "call adds one. A file over about 3.7 MB is not sent, as a client may refuse it: ask again with a smaller " +
+      "A refused id lists the views that can be used. Files go to %LOCALAPPDATA%\\RevitMCP\\snapshots and each " +
+      "call adds one. When Revit starts, only the 200 newest snapshots are kept and the older ones are deleted. " +
+      "A file over about 3.7 MB is not sent, as a client may refuse it: ask again with a smaller " +
       "widthPx. That was reached at a width of 4096 but not 3000. Related tools: create_3d_view, get_model_info.",
     inputSchema: {
       viewId: z.string().min(1).describe("The id of the view, as a string."),

@@ -62,7 +62,7 @@ public sealed class CommandHandler(RequestQueue queue, CommandRegistry commands,
     /// for a signal that went unserved or was refused. Runs on any thread and never throws, so it must call no
     /// Revit API except through <see cref="Signal"/>, whose <c>Raise</c> is the one call allowed off the main thread.
     /// A refusal that lasts would fill the log at one line per tick, so the log gets the first refusal, then at most
-    /// one line a minute, and one line when Raise works again.
+    /// one line a minute, and one line when the run ends: when Raise works again, or when no request waits any more.
     /// </summary>
     public void SignalIfQueued()
     {
@@ -74,16 +74,17 @@ public sealed class CommandHandler(RequestQueue queue, CommandRegistry commands,
 
         try
         {
-            if (queue.Count > 0)
+            if (queue.Count == 0)
             {
-                if (Signal?.Signal() == SignalResult.Accepted)
-                {
-                    ReportRaised();
-                }
-                else
-                {
-                    ReportRefusal("Could not raise the external event for the requests still queued. The timer tries again.", null);
-                }
+                ReportIdle();
+            }
+            else if (Signal?.Signal() == SignalResult.Accepted)
+            {
+                ReportRaised();
+            }
+            else
+            {
+                ReportRefusal("Could not raise the external event for the requests still queued. The timer tries again.", null);
             }
         }
         catch (Exception e)
@@ -109,6 +110,19 @@ public sealed class CommandHandler(RequestQueue queue, CommandRegistry commands,
         if (_refusals.EndsRun(out var refusals))
         {
             Log.Info($"The external event can be raised again, after {refusals} refused attempts.");
+        }
+    }
+
+    /// <summary>
+    /// A run of refusals also ends when no request waits any more: the queue expired them or failed them, or Revit served
+    /// them after a signal of another caller. Without this the run would stay open, the next refusal would be held back
+    /// as part of it, and the log would end on "the timer tries again". It says nothing of whether Raise works.
+    /// </summary>
+    private void ReportIdle()
+    {
+        if (_refusals.EndsRun(out var refusals))
+        {
+            Log.Info($"No request waits any more, so the timer stopped raising the external event. {refusals} attempts to raise it had failed or been refused before that. Whether it can be raised now is not known.");
         }
     }
 

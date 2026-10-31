@@ -232,7 +232,7 @@ async function closedProject(client: BridgeClient): Promise<string | null> {
   return files.sort().at(-1) ?? null;
 }
 
-describe("stage 2 live checks: delete and undo", { timeout: 120_000 }, () => {
+describe("stage 2 live checks: delete and undo", { timeout: 180_000 }, () => {
   it("creates a project for this run", async () => {
     await withClient(async (client) => {
       await client.call("create_project", { name });

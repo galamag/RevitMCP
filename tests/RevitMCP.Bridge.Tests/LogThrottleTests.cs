@@ -127,6 +127,46 @@ public class LogThrottleTests
     }
 
     [Fact]
+    public void EndsRun_ClosesARunWithoutASuccessAndSaysNothingMoreOnLaterEmptyTicks()
+    {
+        // Timer ticks of one second while requests wait, and Raise refused: one line, the rest held back.
+        for (var second = 0; second < 30; second++)
+        {
+            _throttle.ShouldLogFailure(out _);
+            _clock.Advance(TimeSpan.FromSeconds(1));
+        }
+
+        // The queue empties (the requests expired), and the next ticks find nothing to raise.
+        Assert.True(_throttle.EndsRun(out var failures));
+        Assert.Equal(30, failures);
+
+        for (var second = 0; second < 5; second++)
+        {
+            Assert.False(_throttle.EndsRun(out _));
+            _clock.Advance(TimeSpan.FromSeconds(1));
+        }
+    }
+
+    [Fact]
+    public void ShouldLogFailure_AfterARunEndedWithNothingLeftToAttemptStartsAFreshRunAtOnce()
+    {
+        _throttle.ShouldLogFailure(out _);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        _throttle.ShouldLogFailure(out _);
+        _throttle.EndsRun(out _);
+
+        // Well inside the interval of the first line: the old run is closed, so this refusal is not held back as part of it.
+        _clock.Advance(TimeSpan.FromSeconds(5));
+
+        Assert.True(_throttle.ShouldLogFailure(out var heldBack));
+        Assert.Equal(0, heldBack);
+
+        // And its count starts from zero, apart from the old run.
+        Assert.True(_throttle.EndsRun(out var failures));
+        Assert.Equal(1, failures);
+    }
+
+    [Fact]
     public void ShouldLogFailure_AfterARecoveryLogsAtOnceAsANewRun()
     {
         _throttle.ShouldLogFailure(out _);
