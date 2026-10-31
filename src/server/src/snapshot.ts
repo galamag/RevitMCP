@@ -14,8 +14,8 @@ interface SnapshotAnswer {
 }
 
 /**
- * The largest file sent to a client. An MCP image travels as base64, a third larger than the file, and the Claude API
- * takes at most 5 MB per image, so a larger file would fail the whole conversation turn and not only this tool.
+ * The largest file sent to a client. An MCP image travels as base64, a third larger than the file, and the strictest
+ * platform in Claude's vision guide takes 5 MB of base64 per image. Revit reaches this at a width of about 3500 pixels.
  */
 export const MAX_SNAPSHOT_BYTES = (5 * 1024 * 1024 * 3) / 4;
 

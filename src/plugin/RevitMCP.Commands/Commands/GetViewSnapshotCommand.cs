@@ -130,6 +130,8 @@ public sealed class GetViewSnapshotCommand : ICommand
 
         return File.Exists(path)
             ? path
-            : throw new RequestFailedException(JsonRpcCodes.InternalError, $"Revit reported no error, but left no image at {path}.");
+            : throw new RequestFailedException(
+                JsonRpcCodes.InternalError,
+                $"Revit reported no error, but left no image at {path}. A view name of about 200 characters makes a file name too long for Windows.");
     }
 }

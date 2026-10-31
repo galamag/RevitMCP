@@ -166,14 +166,18 @@ export const tools: readonly ToolDefinition[] = [
     name: "create_3d_view",
     description:
       "Creates a new 3D view in the active project as one Undo step, and leaves the active view as it is. kind is " +
-      "isometric, which keeps Revit's default direction, or perspective, which needs eyeMm and targetMm. Passing " +
-      "eyeMm or targetMm with isometric is refused, because an isometric view here cannot use them. displayStyle " +
-      "is shading, realistic (materials) or rendering. name is the exact name of the view: a name that a 3D view " +
-      "already has is refused, never changed, so use get_model_info to see the views. Returns { committed, viewId, " +
-      "name, kind, displayStyle, warnings, errors, dialogs }. Read committed: when it is false nothing was created, " +
-      "viewId is null and errors says why. displayStyle is what the view really has. warnings lists what Revit " +
-      "reported, and dialogs ([{ dialogId, message }]) the dialogs that came up and were refused, usually none. " +
-      "The project then has unsaved changes. Related tools: get_view_snapshot, save_project.",
+      "isometric, which looks from the south-east and above, or perspective, which needs eyeMm and targetMm. A " +
+      "perspective camera sees about 43 degrees across and 33 degrees up, with the horizon level, so to fit a " +
+      "building stand about 1.5 times its width away. Passing eyeMm or targetMm with isometric is refused, because " +
+      "this tool cannot aim an isometric view. displayStyle is realistic for the best picture: it draws materials, " +
+      "but no cast shadows and no sky yet. shading draws plain colours. rendering does not render: its picture is " +
+      "only outlines and hatching, so do not use it to show a building. The background is Revit's canvas colour and " +
+      "level lines stay visible. name is the exact name of the view: a name that a 3D view already has is refused, " +
+      "never changed, so use get_model_info to see the views. Returns { committed, viewId, name, kind, displayStyle, " +
+      "warnings, errors, dialogs }. Read committed: when it is false nothing was created, viewId and displayStyle " +
+      "are null and errors says why. Otherwise displayStyle is what the view really has. warnings lists what Revit reported, and dialogs " +
+      "([{ dialogId, message }]) the dialogs that came up and were refused, usually none. The project then has " +
+      "unsaved changes. Related tools: get_view_snapshot, save_project.",
     inputSchema: {
       name: z.string().min(1).describe("The name of the new view. Russian is fine. Revit forbids some characters in names, such as { } [ ] | ; < > ? ` ~ \\ :"),
       kind: z.enum(["isometric", "perspective"]).describe("isometric has no vanishing points; perspective looks like a photo."),
@@ -190,8 +194,8 @@ export const tools: readonly ToolDefinition[] = [
       "create_3d_view; the view need not be open. Plans, sections, elevations, 3D views, sheets, drafting views and " +
       "legends can be exported. Schedules and other tables cannot, and are refused, like an id that is no view. " +
       "A refused id lists the views that can be used. Files stay in %LOCALAPPDATA%\\RevitMCP\\snapshots and each " +
-      "call adds one. A file over about 3.7 MB is not sent, because a client cannot take it: ask again with a " +
-      "smaller widthPx. Related tools: create_3d_view, get_model_info.",
+      "call adds one. A file over about 3.7 MB is not sent, as a client may refuse it: ask again with a smaller " +
+      "widthPx. That was reached at a width of 4096 but not 3000. Related tools: create_3d_view, get_model_info.",
     inputSchema: {
       viewId: z.string().min(1).describe("The id of the view, as a string."),
       widthPx: z

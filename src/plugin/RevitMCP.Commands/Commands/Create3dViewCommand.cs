@@ -49,6 +49,12 @@ public sealed class Create3dViewCommand : ICommand
             {
                 view.SetOrientation(camera);
                 view.SaveOrientation();
+
+                // Live Revit: a new perspective view clips at about 36 m, so a camera further away got a flat empty picture.
+                if (view.get_Parameter(BuiltInParameter.VIEWER_BOUND_ACTIVE_FAR)?.Set(0) != true)
+                {
+                    scope.Abort("Revit refused to turn off the far clip of the view, so far things would stay invisible.");
+                }
             }
 
             if (view.Name != name)
