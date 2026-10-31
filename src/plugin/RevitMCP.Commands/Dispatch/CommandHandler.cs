@@ -23,7 +23,7 @@ public sealed class ExternalEventSignal(ExternalEvent externalEvent) : IEventSig
 /// Serves the queue on the Revit main thread, one request per call, so Revit gets control back between requests.
 /// No exception leaves <see cref="Execute"/>: Revit denies an event whose handler failed.
 /// </summary>
-public sealed class CommandHandler(RequestQueue queue, CommandRegistry commands) : IExternalEventHandler
+public sealed class CommandHandler(RequestQueue queue, CommandRegistry commands, DialogGuard dialogGuard) : IExternalEventHandler
 {
     /// <summary>The prefix of the error message a request gets when its command needs a document.</summary>
     public const string NoActiveDocument = "no_active_document";
@@ -111,7 +111,10 @@ public sealed class CommandHandler(RequestQueue queue, CommandRegistry commands)
                     $"{NoActiveDocument}: {request.Method} needs an open document, and Revit has no active one.");
             }
 
-            request.Complete(command.Execute(new CommandContext(app, document), request.Params));
+            using (dialogGuard.Activate())
+            {
+                request.Complete(command.Execute(new CommandContext(app, document), request.Params));
+            }
         }
         catch (RequestFailedException e)
         {

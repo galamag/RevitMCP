@@ -50,7 +50,7 @@ public sealed class GetModelInfoCommand : ICommand
                 name = level.Name,
 
                 // ProjectElevation, because Elevation shifts with the level's Elevation Base setting.
-                elevationMm = UnitUtils.ConvertFromInternalUnits(level.ProjectElevation, UnitTypeId.Millimeters),
+                elevationMm = Units.InternalToMm(level.ProjectElevation),
             })
             .ToList();
 

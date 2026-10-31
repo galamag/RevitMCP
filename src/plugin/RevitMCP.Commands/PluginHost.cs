@@ -29,6 +29,7 @@ public static class PluginHost
 
     private static BridgeServer? _server;
     private static Timer? _drainTimer;
+    private static DialogGuard? _dialogGuard;
 
     public static void Start(UIControlledApplication application)
     {
@@ -36,12 +37,12 @@ public static class PluginHost
 
         try
         {
-            StartBridge();
+            StartBridge(application);
         }
         catch (Exception e)
         {
             Log.Error("The bridge stays off: its startup failed.", e);
-            TearDown();
+            TearDown(application);
         }
     }
 
@@ -49,7 +50,7 @@ public static class PluginHost
     {
         ArgumentNullException.ThrowIfNull(application);
 
-        TearDown();
+        TearDown(application);
     }
 
     /// <summary>
@@ -72,7 +73,7 @@ public static class PluginHost
     /// The bridge types stay out of <see cref="Start"/> and <see cref="Stop"/>, so that even a missing
     /// <c>RevitMCP.Bridge.dll</c> surfaces inside a try: the runtime resolves them when it compiles a method.
     /// </summary>
-    private static void TearDown()
+    private static void TearDown(UIControlledApplication application)
     {
         _drainTimer?.Dispose();
         _drainTimer = null;
@@ -88,6 +89,15 @@ public static class PluginHost
 
         try
         {
+            DetachDialogGuard(application);
+        }
+        catch (Exception e)
+        {
+            Log.Error("Could not detach the dialog guard.", e);
+        }
+
+        try
+        {
             DeleteConnectionFile();
         }
         catch (Exception e)
@@ -96,7 +106,7 @@ public static class PluginHost
         }
     }
 
-    private static void StartBridge()
+    private static void StartBridge(UIControlledApplication application)
     {
         var commands = CommandRegistry.CreateDefault();
         if (!MayClaimConnectionFile())
@@ -104,10 +114,13 @@ public static class PluginHost
             return;
         }
 
+        _dialogGuard = new DialogGuard();
+        application.DialogBoxShowing += _dialogGuard.OnDialogBoxShowing;
+
         var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(TokenBytes));
         var clock = TimeProvider.System;
         var queue = new RequestQueue(clock);
-        var handler = new CommandHandler(queue, commands);
+        var handler = new CommandHandler(queue, commands, _dialogGuard);
         var signal = new ExternalEventSignal(ExternalEvent.Create(handler));
         handler.Signal = signal;
 
@@ -160,6 +173,15 @@ public static class PluginHost
         if (_server?.StopAsync().Wait(StopTimeout) == false)
         {
             Log.Error($"The bridge did not stop within {StopTimeout.TotalSeconds:0} s.");
+        }
+    }
+
+    private static void DetachDialogGuard(UIControlledApplication application)
+    {
+        if (_dialogGuard is not null)
+        {
+            application.DialogBoxShowing -= _dialogGuard.OnDialogBoxShowing;
+            _dialogGuard = null;
         }
     }
 
