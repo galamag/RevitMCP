@@ -143,7 +143,8 @@ function assertLanded(batch: Batch): void {
 
 /** The journal Revit is writing now. Its number only ever grows, so the highest belongs to the running Revit. */
 async function journalPath(): Promise<string> {
-  const folder = path.join(homedir(), "AppData", "Local", "Autodesk", "Revit", "Autodesk Revit 2027", "Journals");
+  const localAppData = process.env["LOCALAPPDATA"] || path.join(homedir(), "AppData", "Local");
+  const folder = path.join(localAppData, "Autodesk", "Revit", "Autodesk Revit 2027", "Journals");
   const numbers = (await readdir(folder)).flatMap((file) => /^journal\.(\d+)\.txt$/.exec(file)?.[1] ?? []);
   const newest = numbers.sort((a, b) => Number(a) - Number(b)).at(-1);
   assert.ok(newest, `no journal in ${folder}`);
