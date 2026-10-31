@@ -76,8 +76,8 @@ Run `dotnet` from the repository root and `npm` from `src/server`.
 - Build the MCP server: `npm run build`. `.mcp.json` starts the result, `src/server/dist/index.js`, so rebuild after changing the server.
 - Type check, tests included: `npm run typecheck`.
 - Unit tests: `dotnet test RevitMCP.sln` and `npm test`.
-- Deploy the plugin and restart Revit: `powershell -NoProfile -ExecutionPolicy Bypass -File scriptsestart-revit.ps1`. It builds with `-p:DeployToRevit=true`, and it closes Revit only when `npm run revit:can-close` passes, so call `save_project` first. If it stops by timeout, a Revit dialog is probably waiting: do not retry, look at Revit.
-- Live tests: `npm run test:live`. They need a running Revit with the plugin loaded. Each file creates a new project in `%USERPROFILE%DocumentsRevitMCP`, leaves it open and saved, and `box.live.test.ts` keeps its snapshots in `task14-acceptance` there.
+- Deploy the plugin and restart Revit: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restart-revit.ps1`. It builds with `-p:DeployToRevit=true`, and it closes Revit only when `npm run revit:can-close` passes, so call `save_project` first. If it stops by timeout, a Revit dialog is probably waiting: do not retry, look at Revit.
+- Live tests: `npm run test:live`. They need a running Revit with the plugin loaded. Each file creates a new project in `%USERPROFILE%\Documents\RevitMCP`, leaves it open and saved, and `box.live.test.ts` keeps its snapshots in `task14-acceptance` there.
 - Reopen check: a live run prints `to check the reopen after a restart, set REVITMCP_REOPEN_NAME=<name>`. Restart Revit with the script, then run `$env:REVITMCP_REOPEN_NAME = '<name>'; npm run test:live` in PowerShell. Without that variable `reopens after a restart with the name intact` is skipped.
 
 ## Subagents
