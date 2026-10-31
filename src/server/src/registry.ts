@@ -68,6 +68,7 @@ const BATCH_RULES =
   "items has one entry per requested item, in order: { index, status, elementId, requested, actual, warnings, error }. index counts from 0. requested is the item as received, " +
   "and actual is what Revit really produced, read back from the model, so compare the two. elementId and actual are null unless the element exists. " +
   "created means the element is in the model. failed means Revit refused this item while the batch ran, and error says why: the batch stops there and nothing lands. " +
+  "The one exception is a failed item with committed true: Revit removed that element when it committed, so it is not in the model, while the other items landed. " +
   "rolled_back means this item is not in the model because the batch did not land: it was created and undone, or, when its error says not attempted, the batch stopped before it. " +
   "When Revit refuses only at the end, no item is failed: every item is rolled_back and the reason is in errors. " +
   "warnings at the top lists what Revit reported about the model, such as overlapping walls, and these do not stop a batch, so read them. dialogs ([{ dialogId, message }]) lists the Revit dialogs that came up and were refused, usually none. " +
@@ -284,7 +285,8 @@ export const tools: readonly ToolDefinition[] = [
       "baseOffsetMm, which may be negative. Give exactly one of heightMm, a fixed height in millimetres that stays the " +
       "same when levels move, and topLevelId, which ties the top of the wall to that level. A top level must be above " +
       "the foot of the wall. Revit cannot build a very low wall: 30 mm failed and 50 mm worked, and such an item fails " +
-      "with only the words Failed to regenerate. Walls join their neighbours by Revit's own rules, and this tool changes no other element. " +
+      "with Revit could not build this element and gave no reason: Failed to regenerate. Nor can it build a very short one: a wall 1 mm long " +
+      "passed the check and then made the whole batch fail at commit with Can't make Wall. naming no item, while 5 mm worked. Walls join their neighbours by Revit's own rules, and this tool changes no other element. " +
       "actual is { startMm, endMm, lengthMm, heightMm, widthMm, baseOffsetMm, typeId, levelId, topLevelId }: lengthMm is " +
       "along the centre line, heightMm is measured from the foot of the wall, and topLevelId is null for a fixed height. " +
       BATCH_RULES +

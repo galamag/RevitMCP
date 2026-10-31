@@ -74,7 +74,7 @@ public sealed class CreateLevelsCommand : ICommand
             warnings.Add($"Level '{level.Name}' stands at {elevationMm:0.###} mm, not at the {input.ElevationMm:0.###} mm asked for. It was not moved.");
         }
 
-        if (input.CreatePlan && level.FindAssociatedPlanViewId() == ElementId.InvalidElementId)
+        if (input.CreatePlan && FindFloorPlan(document, level) is null)
         {
             warnings.Add($"Level '{level.Name}' has no floor plan, and none was created, because an existing level is left as it is.");
         }
@@ -103,7 +103,7 @@ public sealed class CreateLevelsCommand : ICommand
 
     private static object Describe(Document document, Level level)
     {
-        var plan = document.GetElement(level.FindAssociatedPlanViewId());
+        var plan = FindFloorPlan(document, level);
 
         return new
         {
@@ -113,6 +113,18 @@ public sealed class CreateLevelsCommand : ICommand
             planViewName = plan?.Name,
         };
     }
+
+    /// <summary>
+    /// The floor plan of a level. <c>Level.FindAssociatedPlanViewId</c> is not used: it returns the first floor or
+    /// structural plan, so it can name a structural plan, or miss the floor plan behind one.
+    /// </summary>
+    private static ViewPlan? FindFloorPlan(Document document, Level level) =>
+        new FilteredElementCollector(document)
+            .OfClass(typeof(ViewPlan))
+            .Cast<ViewPlan>()
+            .Where(view => !view.IsTemplate && view.ViewType == ViewType.FloorPlan && view.GenLevel?.Id == level.Id)
+            .OrderBy(view => view.Id.Value)
+            .FirstOrDefault();
 
     /// <summary>Found by family, because the names of view types are localized.</summary>
     private ElementId FindPlanType(Document document) =>

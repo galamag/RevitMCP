@@ -13,6 +13,9 @@ internal readonly record struct PlanPointMm(double X, double Y);
 /// </summary>
 internal readonly record struct ItemReader(JsonElement Item, string Where)
 {
+    /// <summary>The most types a refusal lists, so a project with hundreds of them does not bury the message.</summary>
+    private const int MaxListedTypes = 50;
+
     public RequestFailedException Refuse(string problem) => new(JsonRpcCodes.InvalidParams, $"{Where}: {problem}");
 
     public bool Has(string key) => Item.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null;
@@ -97,9 +100,13 @@ internal readonly record struct ItemReader(JsonElement Item, string Where)
             .Select(type => $"{type.Id} ('{type.FamilyName}: {type.Name}')")
             .ToList();
 
+        var listed = valid.Count == 0
+            ? "none"
+            : string.Join(", ", valid.Take(MaxListedTypes)) + (valid.Count > MaxListedTypes ? $", and {valid.Count - MaxListedTypes} more, see list_types" : string.Empty);
+
         throw Refuse(
             $"{key} {Item.GetProperty(key).GetRawText()} is not a type of {category}. "
-            + $"The types of {category} in this project: {(valid.Count == 0 ? "none" : string.Join(", ", valid))}.");
+            + $"The types of {category} in this project: {listed}.");
     }
 
     private string ReadId(string key) =>

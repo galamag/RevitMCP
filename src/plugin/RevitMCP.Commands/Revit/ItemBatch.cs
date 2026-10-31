@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.Exceptions;
 using RevitMCP.Bridge;
 
 namespace RevitMCP.Commands;
@@ -102,11 +103,21 @@ internal static class ItemBatch
                 document.Regenerate();
                 results[position] = new ItemResult(entry.Index, ItemStatus.Created, element.Id.ToString(), entry.Requested, null, [], null);
             }
+            catch (RegenerationFailedException e)
+            {
+                // Revit's own text is only "Failed to regenerate.", so say what that means for this item.
+                Fail(entry.Index, $"Revit could not build this element and gave no reason: {e.Message}", e);
+            }
             catch (Exception e)
             {
-                Log.Error($"{method} item {entry.Index} failed.", e);
-                results[position] = new ItemResult(entry.Index, ItemStatus.Failed, null, entry.Requested, null, [], e.Message);
-                scope.Abort($"Item {entry.Index} failed, so nothing landed: {e.Message}");
+                Fail(entry.Index, e.Message, e);
+            }
+
+            void Fail(int index, string message, Exception e)
+            {
+                Log.Error($"{method} item {index} failed.", e);
+                results[position] = new ItemResult(index, ItemStatus.Failed, null, entry.Requested, null, [], message);
+                scope.Abort($"Item {index} failed, so nothing landed: {message}");
             }
         }
     }
@@ -123,8 +134,20 @@ internal static class ItemBatch
 
             try
             {
-                var element = document.GetElement(ElementIds.Parse(id, method))
-                    ?? throw new InvalidOperationException($"Revit has no element {id}.");
+                var element = document.GetElement(ElementIds.Parse(id, method));
+
+                if (element is null)
+                {
+                    // Revit removed it while committing, so it is not in the model and must not read as created.
+                    Log.Error($"{method} element {id} is gone after the commit.");
+                    results[position] = created with
+                    {
+                        Status = ItemStatus.Failed,
+                        ElementId = null,
+                        Error = $"Revit removed this element when it committed the batch (it was created as {id} and is gone). The rest of the batch landed.",
+                    };
+                    continue;
+                }
 
                 results[position] = created with { Actual = JsonSerializer.SerializeToElement(readBack(element), ProjectSupport.Options) };
             }

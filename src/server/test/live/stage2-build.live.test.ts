@@ -463,7 +463,7 @@ describe("stage 2 live checks: levels, walls and floors", { timeout: 120_000 }, 
 
         assert.equal(batch.committed, false);
         assert.deepEqual(batch.items.map((item) => item.status), ["rolled_back", "failed", "rolled_back"]);
-        assert.equal(batch.items[1]?.error, "Failed to regenerate.");
+        assert.equal(batch.items[1]?.error, "Revit could not build this element and gave no reason: Failed to regenerate.");
         assert.deepEqual(batch.dialogs, []);
       }
 
