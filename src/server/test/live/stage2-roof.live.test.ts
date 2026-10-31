@@ -97,6 +97,17 @@ const SLOPE_NEAR_DEG = 0.001;
 const WIDTH_MM = 12000;
 const DEPTH_MM = 8000;
 
+/** No two edges are alike, so a roof sloped on one edge has a height that belongs to that edge alone. */
+const UNEVEN: Point[] = [{ x: 0, y: 0 }, { x: 16000, y: 0 }, { x: 11000, y: 7000 }, { x: 2000, y: 11000 }];
+
+/** The same outline in each direction, from different corners. */
+const ORDERS: Array<[string, Point[]]> = [
+  ["counter-clockwise", UNEVEN],
+  ["clockwise", [...UNEVEN].reverse()],
+  ["counter-clockwise from another corner", [...UNEVEN.slice(2), ...UNEVEN.slice(0, 2)]],
+  ["clockwise from another corner", [...UNEVEN.slice(1), ...UNEVEN.slice(0, 1)].reverse()],
+];
+
 const stamp = new Date().toTimeString().slice(0, 8).replaceAll(":", "");
 const name = `проверка-задача12-${stamp}`;
 const snapshotFolder = path.join(homedir(), "Documents", "RevitMCP", "task12-probe");
@@ -172,15 +183,17 @@ function rectangle(x: number, y: number, width = WIDTH_MM, depth = DEPTH_MM): Po
 
 const tan = (degrees: number): number => Math.tan((degrees * Math.PI) / 180);
 
-/** Distance from the line of edge `index` to the corner farthest from it. A roof sloped on that edge alone rises over this run. */
-function runOf(points: Point[], index: number): number {
-  const start = points[index];
-  const end = points[(index + 1) % points.length];
+/** Distance from a point to the line through edge `index` of an outline. */
+function distanceToEdge(point: Point, outline: Point[], index: number): number {
+  const start = outline[index];
+  const end = outline[(index + 1) % outline.length];
   assert.ok(start && end);
-  const length = Math.hypot(end.x - start.x, end.y - start.y);
 
-  return Math.max(...points.map((point) => Math.abs((end.x - start.x) * (point.y - start.y) - (end.y - start.y) * (point.x - start.x)) / length));
+  return Math.abs((end.x - start.x) * (point.y - start.y) - (end.y - start.y) * (point.x - start.x)) / Math.hypot(end.x - start.x, end.y - start.y);
 }
+
+/** Distance from the line of edge `index` to the corner farthest from it. A roof sloped on that edge alone rises over this run. */
+const runOf = (points: Point[], index: number): number => Math.max(...points.map((point) => distanceToEdge(point, points, index)));
 
 /** Walls on the edges of an outline, in the same order. */
 function wallsAlong(outline: Point[], typeId: string, levelId: string, topLevelId: string): unknown[] {
@@ -393,16 +406,7 @@ describe("stage 2 live checks: roofs and attached walls", { timeout: 120_000 }, 
     await withClient(async (client) => {
       const { roofType, upper } = await context(client);
 
-      // No two edges are alike, so a roof sloped on one edge has a height that belongs to that edge alone.
-      const shape = [{ x: 0, y: 0 }, { x: 16000, y: 0 }, { x: 11000, y: 7000 }, { x: 2000, y: 11000 }];
-      const orders: Array<[string, Point[]]> = [
-        ["counter-clockwise", shape],
-        ["clockwise", [...shape].reverse()],
-        ["counter-clockwise from another corner", [...shape.slice(2), ...shape.slice(0, 2)]],
-        ["clockwise from another corner", [...shape.slice(1), ...shape.slice(0, 1)].reverse()],
-      ];
-
-      const items = orders.flatMap(([, points], order) =>
+      const items = ORDERS.flatMap(([, points], order) =>
         points.map((_, edge) => ({
           outlineMm: points.map(({ x, y }) => ({ x: x + 300000 + 25000 * edge, y: y + 25000 * order })),
           levelId: upper.id,
@@ -416,9 +420,9 @@ describe("stage 2 live checks: roofs and attached walls", { timeout: 120_000 }, 
       const roofs = await readElements(client, batch.items.map((item) => item.elementId));
 
       // The roof's thickness is the same in all of them, so heights are compared with the first roof.
-      const offset = (roofs[0]?.boundingBoxMm?.max.z ?? 0) - runOf(shape, 0) * tan(SLOPE_DEG);
+      const offset = (roofs[0]?.boundingBoxMm?.max.z ?? 0) - runOf(UNEVEN, 0) * tan(SLOPE_DEG);
 
-      for (const [order, [title, points]] of orders.entries()) {
+      for (const [order, [title, points]] of ORDERS.entries()) {
         for (const [edge] of points.entries()) {
           const position = order * points.length + edge;
           const expected = offset + runOf(points, edge) * tan(SLOPE_DEG);
@@ -428,6 +432,79 @@ describe("stage 2 live checks: roofs and attached walls", { timeout: 120_000 }, 
           assertNear(roofs[position]?.boundingBoxMm?.max.z, expected, `${title}, edge ${edge}`, ROOF_NEAR_MM);
           assert.deepEqual(actual.map((entry) => entry.definesSlope), points.map((_, index) => index === edge), `${title}, edge ${edge}`);
         }
+      }
+    });
+  });
+
+  it("with an overhang too, each slope lands on its own edge, and each edge moves out by the overhang", async () => {
+    await withClient(async (client) => {
+      const { roofType, upper } = await context(client);
+      const placeOf = (points: Point[], order: number, edge: number): Point[] => points.map(({ x, y }) => ({ x: x + 300000 + 25000 * edge, y: y + 200000 + 25000 * order }));
+
+      const items = ORDERS.flatMap(([, points], order) =>
+        points.map((_, edge) => ({
+          outlineMm: placeOf(points, order, edge),
+          levelId: upper.id,
+          typeId: roofType.id,
+          overhangMm: OVERHANG_MM,
+          edgeSlopesDeg: points.map((__, index) => (index === edge ? SLOPE_DEG : null)),
+        })),
+      );
+
+      const batch = await call(client, "create_roof", items);
+      assertLanded(batch);
+      const roofs = await readElements(client, batch.items.map((item) => item.elementId));
+
+      // The plane stays on the requested edge at the height of the level, so the height of any eave corner follows from its distance to that edge.
+      const riseOf = (position: number, edge: number): number => {
+        const outline = items[position]?.outlineMm ?? [];
+        const corners = (batch.items[position]?.actual?.["edges"] as RoofEdge[]).map((entry) => entry.startMm);
+
+        return Math.max(...corners.map((corner) => distanceToEdge(corner, outline, edge))) * tan(SLOPE_DEG);
+      };
+
+      const thickness = (roofs[0]?.boundingBoxMm?.max.z ?? 0) - riseOf(0, 0);
+
+      for (const [order, [title, points]] of ORDERS.entries()) {
+        for (const [edge] of points.entries()) {
+          const position = order * points.length + edge;
+          const outline = items[position]?.outlineMm ?? [];
+          const actual = batch.items[position]?.actual?.["edges"] as RoofEdge[];
+          console.log(`# ${title}, edge ${edge}: top ${roofs[position]?.boundingBoxMm?.max.z}, expected ${(thickness + riseOf(position, edge)).toFixed(1)}`);
+
+          assertNear(roofs[position]?.boundingBoxMm?.max.z, thickness + riseOf(position, edge), `${title}, edge ${edge}`, ROOF_NEAR_MM);
+          assert.deepEqual(actual.map((entry) => entry.definesSlope), points.map((_, index) => index === edge), `${title}, edge ${edge}`);
+
+          for (const [index, entry] of actual.entries()) {
+            assertNear(distanceToEdge(entry.startMm, outline, index), OVERHANG_MM, `start of edge ${index} of ${title}`);
+            assertNear(distanceToEdge(entry.endMm, outline, index), OVERHANG_MM, `end of edge ${index} of ${title}`);
+          }
+        }
+      }
+    });
+  });
+
+  it("every roof type of the template builds a hip roof", async () => {
+    await withClient(async (client) => {
+      const { upper } = await context(client);
+      const types = (await client.call("list_types", { category: "roofs" })) as TypeRow[];
+
+      // Told apart by its family, which comes in the language of Revit, so this holds for the English Revit in use here.
+      const glazing = types.find((type) => type.family === "Sloped Glazing")?.id;
+
+      for (const [index, type] of types.entries()) {
+        const batch = await call(client, "create_roof", [
+          { outlineMm: rectangle(1200000 + 30000 * index, 0), levelId: upper.id, typeId: type.id, overhangMm: OVERHANG_MM, edgeSlopesDeg: [SLOPE_DEG, SLOPE_DEG, SLOPE_DEG, SLOPE_DEG] },
+        ]);
+        console.log(`# type ${type.id} ${type.family}: ${type.name}: ${batch.items[0]?.status} ${JSON.stringify(batch.items[0]?.actual?.["boundingBoxMm"])} ${JSON.stringify(batch.errors)} ${JSON.stringify(batch.items[0]?.warnings)}`);
+
+        assertLanded(batch);
+        assert.equal(batch.items[0]?.status, "created");
+        assert.equal(batch.items[0]?.actual?.["typeId"], type.id);
+        assert.deepEqual(batch.items[0]?.warnings, []);
+
+        // Only a basic roof has a box, as the description says.
+        assert.equal(batch.items[0]?.actual?.["boundingBoxMm"] !== null, type.id !== glazing, `box of ${type.id}`);
       }
     });
   });
