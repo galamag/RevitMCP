@@ -28,6 +28,11 @@ public sealed class CommandHandler(RequestQueue queue, CommandRegistry commands,
     /// <summary>The prefix of the error message a request gets when its command needs a document.</summary>
     public const string NoActiveDocument = "no_active_document";
 
+    /// <summary>How often a refusal that lasts reaches the log, after the first one.</summary>
+    private static readonly TimeSpan RefusalLogInterval = TimeSpan.FromMinutes(1);
+
+    private readonly LogThrottle _refusals = new(TimeProvider.System, RefusalLogInterval);
+
     private int _signalling;
 
     /// <summary>Raises the event again while requests wait. Set it before the event can first be raised.</summary>
@@ -56,6 +61,8 @@ public sealed class CommandHandler(RequestQueue queue, CommandRegistry commands,
     /// Raises the event while requests wait: at the end of <see cref="Execute"/>, and on a timer as the fallback
     /// for a signal that went unserved or was refused. Runs on any thread and never throws, so it must call no
     /// Revit API except through <see cref="Signal"/>, whose <c>Raise</c> is the one call allowed off the main thread.
+    /// A refusal that lasts would fill the log at one line per tick, so the log gets the first refusal, then at most
+    /// one line a minute, and one line when Raise works again.
     /// </summary>
     public void SignalIfQueued()
     {
@@ -67,18 +74,41 @@ public sealed class CommandHandler(RequestQueue queue, CommandRegistry commands,
 
         try
         {
-            if (queue.Count > 0 && Signal?.Signal() != SignalResult.Accepted)
+            if (queue.Count > 0)
             {
-                Log.Error("Could not raise the external event for the requests still queued. The timer tries again.");
+                if (Signal?.Signal() == SignalResult.Accepted)
+                {
+                    ReportRaised();
+                }
+                else
+                {
+                    ReportRefusal("Could not raise the external event for the requests still queued. The timer tries again.", null);
+                }
             }
         }
         catch (Exception e)
         {
-            Log.Error("Raising the external event failed. The timer tries again.", e);
+            ReportRefusal("Raising the external event failed. The timer tries again.", e);
         }
         finally
         {
             Volatile.Write(ref _signalling, 0);
+        }
+    }
+
+    private void ReportRefusal(string message, Exception? exception)
+    {
+        if (_refusals.ShouldLogFailure(out var heldBack))
+        {
+            Log.Error(heldBack > 0 ? $"{message} {heldBack} refusals since the last line stayed out of the log." : message, exception);
+        }
+    }
+
+    private void ReportRaised()
+    {
+        if (_refusals.EndsRun(out var refusals))
+        {
+            Log.Info($"The external event can be raised again, after {refusals} refused attempts.");
         }
     }
 

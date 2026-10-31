@@ -39,25 +39,13 @@ public sealed class CreateFloorsCommand : ICommand
         return new BatchEntry<FloorInput>(index, item, new FloorInput(reader.Outline(document, "boundaryMm", level), typeId, level.Id));
     }
 
-    private static object Describe(Floor floor)
+    private static object Describe(Floor floor) => new
     {
-        var box = floor.get_BoundingBox(null);
-
-        return new
-        {
-            areaM2 = Units.InternalToSquareMetres(floor.get_Parameter(BuiltInParameter.HOST_AREA_COMPUTED).AsDouble()),
-            heightOffsetMm = Units.InternalToMm(floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM).AsDouble()),
-            typeId = floor.GetTypeId().ToString(),
-            levelId = floor.LevelId.ToString(),
-            boundingBoxMm = box is null ? null : new { min = PointMm(box.Min), max = PointMm(box.Max) },
-        };
-    }
-
-    private static object PointMm(XYZ point) => new
-    {
-        x = Units.InternalToMm(point.X),
-        y = Units.InternalToMm(point.Y),
-        z = Units.InternalToMm(point.Z),
+        areaM2 = Units.InternalToSquareMetres(floor.get_Parameter(BuiltInParameter.HOST_AREA_COMPUTED).AsDouble()),
+        heightOffsetMm = Units.InternalToMm(floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM).AsDouble()),
+        typeId = floor.GetTypeId().ToString(),
+        levelId = floor.LevelId.ToString(),
+        boundingBoxMm = ElementJson.BoxMm(floor.get_BoundingBox(null)),
     };
 
     private sealed record FloorInput(CurveLoop Outline, ElementId TypeId, ElementId LevelId);

@@ -7,11 +7,15 @@
      %USERPROFILE%\Documents\RevitMCP, or none open), otherwise the script stops and Revit is left alone.
   2. Revit is closed with CloseMainWindow, once, and given 60 s to exit. If it does not exit, the script
      stops and reports. It never kills the process (no Stop-Process, no taskkill).
-  3. `dotnet build RevitMCP.sln -p:DeployToRevit=true`. A failed build stops the script.
+  3. The plugin is built first without copying, and the SHA-256 of the built entry DLL (RevitMCP.Plugin.dll) is
+     compared with the installed one. When they differ, Revit will ask the user for Always Load again, and the script
+     says so. It only prints: the check never stops the deploy. Then `dotnet build RevitMCP.sln -p:DeployToRevit=true`
+     copies the files. A failed build stops the script.
   4. Revit is started and the script waits up to 120 s for a connection.json written by the new process.
 
   When Revit is not running, steps 1 and 2 are skipped.
-  The RevitInstallDir environment variable overrides C:\Program Files\Autodesk\Revit 2027.
+  The RevitInstallDir environment variable overrides C:\Program Files\Autodesk\Revit 2027, and RevitAddinsDir
+  overrides %APPDATA%\Autodesk\Revit\Addins\2027 (the same variables the build reads).
   The connection token is never printed.
 
 .EXAMPLE
@@ -31,10 +35,41 @@ function Stop-Script([string]$Message) {
     exit 1
 }
 
+# Tells whether Revit will ask for Always Load: it does when the entry DLL differs from the installed one.
+# Only prints. Whatever goes wrong here is reported and never stops the deploy.
+function Write-EntryDllCheck {
+    try {
+        if (-not (Test-Path -LiteralPath $builtEntryDll)) {
+            Write-Host "restart-revit: WARNING. The built entry DLL is not at $builtEntryDll, so the Always Load check was skipped." -ForegroundColor Yellow
+            return
+        }
+        $built = (Get-FileHash -LiteralPath $builtEntryDll -Algorithm SHA256 -ErrorAction Stop).Hash
+
+        if (-not (Test-Path -LiteralPath $installedEntryDll)) {
+            Write-Host "restart-revit: NOTE. No entry DLL is installed at $installedEntryDll yet, so Revit will ask for Always Load (built hash starts $($built.Substring(0, 8)))." -ForegroundColor Yellow
+            return
+        }
+        $installed = (Get-FileHash -LiteralPath $installedEntryDll -Algorithm SHA256 -ErrorAction Stop).Hash
+
+        if ($built -eq $installed) {
+            Write-Host "restart-revit: the entry DLL is unchanged (hash starts $($built.Substring(0, 8))), so Always Load stays."
+        }
+        else {
+            Write-Host "restart-revit: NOTE. The built entry DLL (hash starts $($built.Substring(0, 8))) differs from the installed one ($($installed.Substring(0, 8))). Revit will ask for Always Load again. Continuing." -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "restart-revit: WARNING. Could not compare the entry DLL: $($_.Exception.Message). Continuing." -ForegroundColor Yellow
+    }
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $installDir = if ($env:RevitInstallDir) { $env:RevitInstallDir } else { 'C:\Program Files\Autodesk\Revit 2027' }
 $revitExe = Join-Path $installDir 'Revit.exe'
 $connectionFile = Join-Path $env:LOCALAPPDATA 'RevitMCP\connection.json'
+$addinsDir = if ($env:RevitAddinsDir) { $env:RevitAddinsDir } else { Join-Path $env:APPDATA 'Autodesk\Revit\Addins\2027' }
+$installedEntryDll = Join-Path $addinsDir 'RevitMCP\RevitMCP.Plugin.dll'
+$builtEntryDll = Join-Path $repoRoot 'src\plugin\RevitMCP.Plugin\bin\Debug\net10.0-windows\RevitMCP.Plugin.dll'
 
 if (-not (Test-Path -LiteralPath $revitExe)) {
     Stop-Script "Revit.exe was not found at $revitExe. Set RevitInstallDir to the Revit install folder."
@@ -77,12 +112,21 @@ else {
     Write-Host 'restart-revit: Revit is not running; skipping the close step.'
 }
 
-# 3. Build and deploy the plugin while Revit does not hold its files.
-Write-Host 'restart-revit: building and deploying the plugin.'
+# 3. Build and deploy the plugin while Revit does not hold its files. The deploy is part of the build, so the
+#    entry DLL is built once without it: that is the only way to compare it with the installed one before the copy.
+Write-Host 'restart-revit: building the plugin.'
 Push-Location $repoRoot
 try {
-    & dotnet build RevitMCP.sln -p:DeployToRevit=true
+    & dotnet build src\plugin\RevitMCP.Plugin\RevitMCP.Plugin.csproj
     $buildExit = $LASTEXITCODE
+
+    if ($buildExit -eq 0) {
+        Write-EntryDllCheck
+
+        Write-Host 'restart-revit: deploying the plugin.'
+        & dotnet build RevitMCP.sln -p:DeployToRevit=true
+        $buildExit = $LASTEXITCODE
+    }
 }
 finally {
     Pop-Location

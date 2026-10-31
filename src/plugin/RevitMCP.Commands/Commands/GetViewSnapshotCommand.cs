@@ -6,10 +6,11 @@ using RevitMCP.Commands.Dispatch;
 namespace RevitMCP.Commands;
 
 /// <summary>
-/// Exports one view of the active document to a PNG in <see cref="Folder"/> and answers with its path, and the server
-/// reads the file, so the image never travels over the bridge. An export changes no model, so it runs outside a
-/// transaction and leaves no Undo step. Every export gets its own file name, so a stale file can never pass for this
-/// one. Nothing removes old files.
+/// Exports one view of the active document to a PNG in <see cref="SnapshotRetention.Folder"/> and answers with its path,
+/// and the server reads the file, so the image never travels over the bridge. An export changes no model, so it runs
+/// outside a transaction and leaves no Undo step. Every export gets its own file name, so a stale file can never pass
+/// for this one. Old files go when Revit starts, see <see cref="SnapshotRetention"/>, which also knows the shape of
+/// the names written here.
 /// </summary>
 public sealed class GetViewSnapshotCommand : ICommand
 {
@@ -18,11 +19,6 @@ public sealed class GetViewSnapshotCommand : ICommand
     /// <summary>The limits of <c>widthPx</c>, which <c>registry.ts</c> states too.</summary>
     private const int MinWidthPx = 100;
     private const int MaxWidthPx = 4096;
-
-    private static readonly string Folder = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "RevitMCP",
-        "snapshots");
 
     /// <summary>The kinds of view that draw the model or paper. The others are tables and browsers, with no picture to export.</summary>
     private static readonly HashSet<ViewType> Exportable =
@@ -109,12 +105,12 @@ public sealed class GetViewSnapshotCommand : ICommand
 
     private static string Export(Document document, View view, int widthPx)
     {
-        Directory.CreateDirectory(Folder);
+        Directory.CreateDirectory(SnapshotRetention.Folder);
 
         using var options = new ImageExportOptions
         {
             ExportRange = ExportRange.SetOfViews,
-            FilePath = Path.Combine(Folder, Guid.NewGuid().ToString("N")),
+            FilePath = Path.Combine(SnapshotRetention.Folder, Guid.NewGuid().ToString("N")),
             ZoomType = ZoomFitType.FitToPage,
             FitDirection = FitDirectionType.Horizontal,
             PixelSize = widthPx,

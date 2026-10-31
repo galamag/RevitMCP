@@ -192,14 +192,13 @@ public sealed class CreateRoofCommand : ICommand
     private static object Describe(Document document, FootPrintRoof roof, IReadOnlyList<Line> eaves)
     {
         var curves = roof.GetProfiles().Cast<ModelCurveArray>().SelectMany(loop => loop.Cast<ModelCurve>()).ToList();
-        var box = roof.get_BoundingBox(null);
 
         return new
         {
             edges = eaves.Select(eave => DescribeEdge(roof, CurveOf(document, curves, eave))).ToList(),
             typeId = roof.GetTypeId().ToString(),
             levelId = roof.LevelId.ToString(),
-            boundingBoxMm = box is null ? null : new { min = PointMm(box.Min), max = PointMm(box.Max) },
+            boundingBoxMm = ElementJson.BoxMm(roof.get_BoundingBox(null)),
         };
     }
 
@@ -220,13 +219,6 @@ public sealed class CreateRoofCommand : ICommand
     }
 
     private static object PlanPoint(XYZ point) => new { x = Units.InternalToMm(point.X), y = Units.InternalToMm(point.Y) };
-
-    private static object PointMm(XYZ point) => new
-    {
-        x = Units.InternalToMm(point.X),
-        y = Units.InternalToMm(point.Y),
-        z = Units.InternalToMm(point.Z),
-    };
 
     private sealed record RoofInput(IReadOnlyList<Line> Eaves, IReadOnlyList<double?> SlopesDeg, Level Level, RoofType Type, double Overhang);
 }

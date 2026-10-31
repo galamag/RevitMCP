@@ -46,7 +46,7 @@ public sealed class GetElementsCommand : ICommand
             ["category"] = CategoryMap.KeyOf(element.Category),
             ["typeName"] = document.GetElement(element.GetTypeId())?.Name,
             ["levelId"] = levelId == ElementId.InvalidElementId ? null : levelId.ToString(),
-            ["boundingBoxMm"] = BoxMm(element.get_BoundingBox(null)),
+            ["boundingBoxMm"] = ElementJson.BoxMm(element.get_BoundingBox(null)),
         };
 
         // Only a wall has a top that differs from its box: the box keeps the old height of a wall cut down to a roof.
@@ -57,14 +57,4 @@ public sealed class GetElementsCommand : ICommand
 
         return description;
     }
-
-    private static object? BoxMm(BoundingBoxXYZ? box) =>
-        box is null ? null : new { min = PointMm(box.Min), max = PointMm(box.Max) };
-
-    private static object PointMm(XYZ point) => new
-    {
-        x = Units.InternalToMm(point.X),
-        y = Units.InternalToMm(point.Y),
-        z = Units.InternalToMm(point.Z),
-    };
 }

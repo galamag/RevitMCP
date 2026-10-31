@@ -146,6 +146,33 @@ public static class PluginHost
         _drainTimer = new Timer(_ => handler.SignalIfQueued(), null, DrainInterval, DrainInterval);
 
         Log.Info($"The bridge listens on 127.0.0.1:{port}, protocol version {BridgeServer.ProtocolVersion}, build {DescribeBuild()}.");
+
+        TrimSnapshots();
+    }
+
+    /// <summary>
+    /// Removes the oldest snapshots at startup, while no command can export one. A failure goes to the log only:
+    /// old pictures are not worth a bridge that stays off.
+    /// </summary>
+    private static void TrimSnapshots()
+    {
+        try
+        {
+            var result = SnapshotRetention.Trim(SnapshotRetention.Folder, SnapshotRetention.Keep);
+            if (result.Removed > 0)
+            {
+                Log.Info($"Removed {result.Removed} old snapshots from {SnapshotRetention.Folder}, keeping the {SnapshotRetention.Keep} newest.");
+            }
+
+            if (result.Failed > 0)
+            {
+                Log.Error($"Could not remove {result.Failed} old snapshots from {SnapshotRetention.Folder}. The first failure follows.", result.FirstFailure);
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Error($"Could not trim the snapshot folder {SnapshotRetention.Folder}.", e);
+        }
     }
 
     private static bool MayClaimConnectionFile()
