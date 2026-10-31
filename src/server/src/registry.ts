@@ -25,6 +25,10 @@ const IMMEDIATE_TIMEOUT_MS = 10_000;
 const MIN_SNAPSHOT_WIDTH_PX = 100;
 const MAX_SNAPSHOT_WIDTH_PX = 4096;
 
+/** The limits of the sun, which the plugin checks too. */
+const MAX_SUN_AZIMUTH_DEG = 360;
+const MAX_SUN_ALTITUDE_DEG = 90;
+
 const requestId = z
   .string()
   .min(1)
@@ -138,10 +142,12 @@ export const tools: readonly ToolDefinition[] = [
       "[{ id, family, name }] sorted by family, then name, then id, so the order holds between calls. ids are " +
       "strings: pass them back unchanged. family and name are Revit's own text, usually Russian: read them to choose " +
       "a type, and never guess or translate one. An empty list means that no type of this category is loaded in the " +
-      "project, not that the category is unknown. Related tools: get_elements, get_model_info.",
+      "project, not that the category is unknown. view_templates is not a category of elements: it lists the 3D view " +
+      "templates for viewTemplateId of create_3d_view, in the same shape, with family as an empty string. " +
+      "Related tools: get_elements, get_model_info, create_3d_view.",
     inputSchema: {
       category: z
-        .enum(["walls", "floors", "roofs", "ceilings", "doors", "windows", "furniture", "plumbing", "stairs", "railings"])
+        .enum(["walls", "floors", "roofs", "ceilings", "doors", "windows", "furniture", "plumbing", "stairs", "railings", "view_templates"])
         .describe("The category to list. These words stay the same whatever the language of Revit."),
     },
   },
@@ -170,9 +176,17 @@ export const tools: readonly ToolDefinition[] = [
       "perspective camera sees about 43 degrees across and 33 degrees up, with the horizon level, so to fit a " +
       "building stand about 1.5 times its width away. Passing eyeMm or targetMm with isometric is refused, because " +
       "this tool cannot aim an isometric view. displayStyle is realistic for the best picture: it draws materials, " +
-      "but no cast shadows and no sky yet. shading draws plain colours. rendering does not render: its picture is " +
-      "only outlines and hatching, so do not use it to show a building. The background is Revit's canvas colour and " +
-      "level lines stay visible. name is the exact name of the view: a name that a 3D view already has is refused, " +
+      "but without a template it has no cast shadows, and the background is Revit's canvas colour. To get shadows, " +
+      "call list_types with view_templates, pick the presentation template by its name, and pass its id as " +
+      "viewTemplateId. Its settings are copied once and the view stays free of it. With a template this tool also " +
+      "sets sunlight to 80, shadows to 60 and a sky background. Whether shadows are on cannot be read back: it can " +
+      "only be seen on a snapshot, and a shadow needs something to fall on, such as a floor around the building. " +
+      "sunAzimuthDeg and sunAltitudeDeg aim the sun relative to the camera, and they come together or not at all: " +
+      "135 stands behind the camera on its right and 250 behind it on its left. 135 with an altitude of 45 worked " +
+      "well. Without them the view keeps its own sun, or the one of the template, which may stand low. shading draws " +
+      "plain colours. rendering does not " +
+      "render: its picture is only outlines and hatching, so do not use it to show a building. Level lines stay " +
+      "visible. name is the exact name of the view: a name that a 3D view already has is refused, " +
       "never changed, so use get_model_info to see the views. Returns { committed, viewId, name, kind, displayStyle, " +
       "warnings, errors, dialogs }. Read committed: when it is false nothing was created, viewId and displayStyle " +
       "are null and errors says why. Otherwise displayStyle is what the view really has. warnings lists what Revit reported, and dialogs " +
@@ -184,6 +198,9 @@ export const tools: readonly ToolDefinition[] = [
       displayStyle: z.enum(["shading", "realistic", "rendering"]).describe("How the view draws the model."),
       eyeMm: modelPoint("Where the camera stands").optional(),
       targetMm: modelPoint("The point the camera looks at").optional(),
+      viewTemplateId: z.string().min(1).optional().describe("The id of a 3D view template from list_types with view_templates. A refusal lists the valid ones."),
+      sunAzimuthDeg: z.number().min(0).max(MAX_SUN_AZIMUTH_DEG).optional().describe("The direction of the sun around the camera, in degrees from 0 to 360."),
+      sunAltitudeDeg: z.number().min(0).max(MAX_SUN_ALTITUDE_DEG).optional().describe("The height of the sun above the horizon, in degrees from 0 to 90."),
     },
   },
   {

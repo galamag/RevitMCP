@@ -172,6 +172,13 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["create_3d_view", { name: "Вид", kind: "isometric", displayStyle: "wireframe" }],
     ["create_3d_view", { name: "Вид", kind: "isometric" }],
     ["create_3d_view", { name: "Вид", kind: "perspective", displayStyle: "realistic", eyeMm: { x: 1, y: 2 }, targetMm: { x: 0, y: 0, z: 0 } }],
+    ["create_3d_view", { name: "Вид", kind: "isometric", displayStyle: "realistic", viewTemplateId: 56766 }],
+    ["create_3d_view", { name: "Вид", kind: "isometric", displayStyle: "realistic", viewTemplateId: "" }],
+    ["create_3d_view", { name: "Вид", kind: "isometric", displayStyle: "realistic", sunAzimuthDeg: -1, sunAltitudeDeg: 45 }],
+    ["create_3d_view", { name: "Вид", kind: "isometric", displayStyle: "realistic", sunAzimuthDeg: 361, sunAltitudeDeg: 45 }],
+    ["create_3d_view", { name: "Вид", kind: "isometric", displayStyle: "realistic", sunAzimuthDeg: 135, sunAltitudeDeg: -1 }],
+    ["create_3d_view", { name: "Вид", kind: "isometric", displayStyle: "realistic", sunAzimuthDeg: 135, sunAltitudeDeg: 91 }],
+    ["create_3d_view", { name: "Вид", kind: "isometric", displayStyle: "realistic", sunAzimuthDeg: "135", sunAltitudeDeg: 45 }],
     ["get_view_snapshot", {}],
     ["get_view_snapshot", { viewId: 123 }],
     ["get_view_snapshot", { viewId: "123", widthPx: 1600.5 }],
@@ -210,6 +217,41 @@ describe("MCP tools", { timeout: 20_000 }, () => {
 
     assert.deepEqual(bridge.frames[0]?.params, { name: "Вид с юга", kind: "perspective", displayStyle: "realistic", ...camera });
     assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
+  it("accepts view_templates in list_types and passes it to Revit", async (t) => {
+    const templates = [{ id: "56766", family: "", name: "Архитектурная презентация 3D" }];
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, templates));
+
+    const result = await client.callTool({ name: "list_types", arguments: { category: "view_templates" } });
+
+    assert.ok(!result.isError);
+    assert.deepEqual(bridge.frames[0]?.params, { category: "view_templates" });
+    assert.deepEqual(JSON.parse(textOf(result)), templates);
+  });
+
+  it("passes a template and a sun of create_3d_view unchanged, at the ends of their ranges too", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+    const view = { name: "Вид", kind: "isometric", displayStyle: "realistic" };
+
+    await client.callTool({ name: "create_3d_view", arguments: { ...view, viewTemplateId: "56766", sunAzimuthDeg: 135.5, sunAltitudeDeg: 45 } });
+    await client.callTool({ name: "create_3d_view", arguments: { ...view, sunAzimuthDeg: 0, sunAltitudeDeg: 90 } });
+    await client.callTool({ name: "create_3d_view", arguments: { ...view, sunAzimuthDeg: 360, sunAltitudeDeg: 0 } });
+
+    assert.deepEqual(bridge.frames[0]?.params, { ...view, viewTemplateId: "56766", sunAzimuthDeg: 135.5, sunAltitudeDeg: 45 });
+    assert.deepEqual(bridge.frames[1]?.params, { ...view, sunAzimuthDeg: 0, sunAltitudeDeg: 90 });
+    assert.deepEqual(bridge.frames[2]?.params, { ...view, sunAzimuthDeg: 360, sunAltitudeDeg: 0 });
+  });
+
+  it("tells the model the truth about shadows in create_3d_view", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "create_3d_view")?.description ?? "";
+
+    assert.match(description, /without a template it has no cast shadows/);
+    assert.match(description, /view_templates/);
+    assert.match(description, /cannot be read back/);
   });
 
   async function snapshotFolder(t: TestContext): Promise<{ folder: string; toolList: readonly ToolDefinition[] }> {

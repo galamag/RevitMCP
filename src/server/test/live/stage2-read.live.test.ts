@@ -73,7 +73,7 @@ const INVALID_PARAMS = -32602;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 // Measured: a flat 1600 x 1200 export from Revit holds 6 distinct bytes, its empty plan 33 and a building 200 and more.
 const FLAT_PICTURE_BYTES = 8;
-const CATEGORIES = ["walls", "floors", "roofs", "ceilings", "doors", "windows", "furniture", "plumbing", "stairs", "railings"];
+const CATEGORIES = ["walls", "floors", "roofs", "ceilings", "doors", "windows", "furniture", "plumbing", "stairs", "railings", "view_templates"];
 const CAMERA = { eyeMm: { x: 20000, y: -20000, z: 8000 }, targetMm: { x: 0, y: 0, z: 2000 } };
 
 const stamp = new Date().toTimeString().slice(0, 8).replaceAll(":", "");
@@ -258,6 +258,115 @@ describe("stage 2 live checks: reading and snapshots", { timeout: 120_000 }, () 
       console.log(`# far camera: ${JSON.stringify(png)}, levels ${info.levels.length}`);
 
       assert.ok(png.distinctBytes > FLAT_PICTURE_BYTES, `the picture is flat: ${JSON.stringify(png)}`);
+    });
+  });
+
+  it("list_types lists only 3D view templates, with Cyrillic names and an empty family", async () => {
+    await withClient(async (client) => {
+      const templates = (await client.call("list_types", { category: "view_templates" })) as TypeRow[];
+      console.log(`# view_templates: ${JSON.stringify(templates)}`);
+
+      assert.ok(templates.length > 0);
+      assert.ok(templates.some((template) => /[а-яё]/i.test(template.name)), "template names should be Cyrillic");
+      assert.ok(templates.every((template) => template.family === "" && /^\d+$/.test(template.id)));
+      assert.deepEqual(await client.call("list_types", { category: "view_templates" }), templates);
+    });
+  });
+
+  // This project holds no walls, so nothing can cast a shadow here: this checks the commit and the PNG only. The shadow
+  // itself was seen on a snapshot of a building, as Task 11 brings the tools to make one.
+  it("create_3d_view takes a template and a sun, and the view exports in realistic", async () => {
+    await withClient(async (client) => {
+      const templates = (await client.call("list_types", { category: "view_templates" })) as TypeRow[];
+      const presentation = templates.find((template) => /презентац/i.test(template.name));
+      assert.ok(presentation, `no presentation template in ${JSON.stringify(templates)}`);
+
+      const created = (await client.call("create_3d_view", {
+        name: "С шаблоном и солнцем",
+        kind: "perspective",
+        displayStyle: "realistic",
+        ...CAMERA,
+        viewTemplateId: presentation.id,
+        sunAzimuthDeg: 135,
+        sunAltitudeDeg: 45,
+      })) as CreatedView;
+      console.log(`# with template and sun: ${JSON.stringify(created)}`);
+
+      assert.equal(created.committed, true);
+      assert.equal(created.displayStyle, "realistic");
+      assert.deepEqual(created.errors, []);
+      assert.deepEqual(created.dialogs, []);
+
+      const snapshot = (await client.call("get_view_snapshot", { viewId: created.viewId, widthPx: 800 })) as Snapshot;
+      const image = await readFile(snapshot.path);
+      const png = inspectPng(image);
+      console.log(`# with template and sun: ${image.length} bytes, ${JSON.stringify(png)}, ${snapshot.path}`);
+      assert.equal(png.width, 800);
+      assert.ok(png.distinctBytes > FLAT_PICTURE_BYTES, `the picture is flat: ${JSON.stringify(png)}`);
+
+      const isometric = (await client.call("create_3d_view", {
+        name: "Изометрия с шаблоном",
+        kind: "isometric",
+        displayStyle: "shading",
+        viewTemplateId: presentation.id,
+      })) as CreatedView;
+      assert.equal(isometric.committed, true);
+      assert.equal(isometric.displayStyle, "shading");
+
+      // Revit refuses a sky in this style, so the tool must not ask for one.
+      const rendering = (await client.call("create_3d_view", {
+        name: "Рендеринг с шаблоном",
+        kind: "isometric",
+        displayStyle: "rendering",
+        viewTemplateId: presentation.id,
+      })) as CreatedView;
+      assert.equal(rendering.committed, true, JSON.stringify(rendering));
+      assert.equal(rendering.displayStyle, "rendering");
+
+      for (const [azimuth, altitude] of [[0, 0], [360, 90]]) {
+        const edge = (await client.call("create_3d_view", {
+          name: `Солнце ${azimuth} ${altitude}`,
+          kind: "isometric",
+          displayStyle: "realistic",
+          sunAzimuthDeg: azimuth,
+          sunAltitudeDeg: altitude,
+        })) as CreatedView;
+        assert.equal(edge.committed, true, JSON.stringify(edge));
+      }
+    });
+  });
+
+  it("create_3d_view refuses a template that is not one and a sun that makes no sense, and lists the valid templates", async () => {
+    await withClient(async (client) => {
+      const info = await modelInfo(client);
+      const templates = (await client.call("list_types", { category: "view_templates" })) as TypeRow[];
+      const [template] = templates;
+      const view = firstView(info, "ThreeD");
+      const plan = firstView(info, "FloorPlan");
+      const level = info.levels[0];
+      assert.ok(template && level);
+      const base = { name: "Отказ", kind: "isometric", displayStyle: "realistic" };
+
+      for (const viewTemplateId of ["999999999", "abc", "", " 5", level.id, view.id, plan.id, Number(template.id)]) {
+        const refused = await refusal(client, "create_3d_view", { ...base, viewTemplateId });
+        assert.equal(refused.code, INVALID_PARAMS, String(viewTemplateId));
+        assert.ok(refused.message.includes(template.id), refused.message);
+      }
+
+      for (const sun of [
+        { sunAzimuthDeg: 135 },
+        { sunAltitudeDeg: 45 },
+        { sunAzimuthDeg: -1, sunAltitudeDeg: 45 },
+        { sunAzimuthDeg: 361, sunAltitudeDeg: 45 },
+        { sunAzimuthDeg: 135, sunAltitudeDeg: -1 },
+        { sunAzimuthDeg: 135, sunAltitudeDeg: 91 },
+        { sunAzimuthDeg: "135", sunAltitudeDeg: 45 },
+      ]) {
+        const refused = await refusal(client, "create_3d_view", { ...base, ...sun });
+        assert.equal(refused.code, INVALID_PARAMS, JSON.stringify(sun));
+      }
+
+      assert.equal((await modelInfo(client)).views.length, info.views.length);
     });
   });
 

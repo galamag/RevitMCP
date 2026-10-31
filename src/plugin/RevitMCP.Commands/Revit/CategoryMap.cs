@@ -4,7 +4,8 @@ namespace RevitMCP.Commands;
 
 /// <summary>
 /// The category words of the contract. They replace localized category names, so a client reads the same word
-/// whatever the language of Revit. <c>registry.ts</c> offers the same words in <c>list_types</c>.
+/// whatever the language of Revit. <c>registry.ts</c> offers the same words in <c>list_types</c>, plus
+/// <see cref="ViewTemplates.Category"/>, which is no category of Revit and so is not here.
 /// </summary>
 internal static class CategoryMap
 {

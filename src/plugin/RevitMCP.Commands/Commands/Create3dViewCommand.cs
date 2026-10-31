@@ -9,6 +9,8 @@ namespace RevitMCP.Commands;
 /// Creates a 3D view as one transaction. Everything that can be refused is refused before it opens, so a refusal keeps
 /// its code. The camera of a perspective view comes from the input, while an isometric view keeps the default direction
 /// of Revit and refuses a camera, as ignoring one would report a view the caller did not ask for.
+/// Revit has no switch for cast shadows: live Revit showed that copying them from a 3D view template is the way, so a
+/// template comes from the caller, and the copy happens once, which leaves the view free of the template.
 /// </summary>
 public sealed class Create3dViewCommand : ICommand
 {
@@ -17,6 +19,14 @@ public sealed class Create3dViewCommand : ICommand
 
     /// <summary>A shorter distance between the eye and the target gives no direction worth trusting.</summary>
     private const double MinCameraDistanceMm = 1;
+
+    /// <summary>The limits of the sun, which <c>registry.ts</c> states too.</summary>
+    private const double MaxSunAzimuthDeg = 360;
+    private const double MaxSunAltitudeDeg = 90;
+
+    /// <summary>Picked by eye in live Revit, on a view with a template and a sky.</summary>
+    private const int SunlightIntensity = 80;
+    private const int ShadowIntensity = 60;
 
     private static readonly Dictionary<string, DisplayStyle> Styles = new(StringComparer.Ordinal)
     {
@@ -36,6 +46,8 @@ public sealed class Create3dViewCommand : ICommand
         var kind = ReadKind(parameters);
         var style = ReadStyle(parameters, out var styleWord);
         var camera = ReadCamera(parameters, kind);
+        var template = ReadTemplate(document, parameters);
+        var sun = ReadSun(parameters);
         var typeId = Find3dViewType(document);
 
         View3D? view = null;
@@ -43,7 +55,35 @@ public sealed class Create3dViewCommand : ICommand
         {
             view = kind == Perspective ? View3D.CreatePerspective(document, typeId) : View3D.CreateIsometric(document, typeId);
             view.Name = name;
+
+            if (template is not null)
+            {
+                view.ApplyViewTemplateParameters(template);
+            }
+
+            // After the template, which brings a style of its own.
             view.DisplayStyle = style;
+
+            if (sun is { } angles)
+            {
+                var settings = view.SunAndShadowSettings;
+                settings.SunAndShadowType = SunAndShadowType.Lighting;
+                settings.RelativeToView = true;
+                settings.Azimuth = Units.DegToRad(angles.AzimuthDeg);
+                settings.Altitude = Units.DegToRad(angles.AltitudeDeg);
+            }
+
+            if (template is not null)
+            {
+                view.SunlightIntensity = SunlightIntensity;
+                view.ShadowIntensity = ShadowIntensity;
+
+                // Revit refuses a background in this style.
+                if (style != DisplayStyle.Rendering)
+                {
+                    view.SetBackground(ViewDisplayBackground.CreateSky());
+                }
+            }
 
             if (camera is not null)
             {
@@ -167,6 +207,57 @@ public sealed class Create3dViewCommand : ICommand
         var up = side.IsZeroLength() ? XYZ.BasisY : side.CrossProduct(forward).Normalize();
 
         return new ViewOrientation3D(eye, up, forward);
+    }
+
+    /// <summary>Returns <c>null</c> when no template was asked for. An ID that is not a 3D view template lists the valid ones.</summary>
+    private View? ReadTemplate(Document document, JsonElement parameters)
+    {
+        if (!parameters.TryGetProperty("viewTemplateId", out var id) || id.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        var found = id.ValueKind == JsonValueKind.String && ElementIds.TryParse(id.GetString()!, out var elementId)
+            ? document.GetElement(elementId) as View
+            : null;
+        if (found is { IsTemplate: true, ViewType: ViewType.ThreeD })
+        {
+            return found;
+        }
+
+        var valid = string.Join(", ", ViewTemplates.List(document).Select(view => $"{view.Id} ('{view.Name}')"));
+
+        throw new RequestFailedException(
+            JsonRpcCodes.InvalidParams,
+            $"{Method}: {id.GetRawText()} is not a 3D view template. The 3D view templates of this project: {(valid.Length == 0 ? "none" : valid)}.");
+    }
+
+    /// <summary>Returns <c>null</c> when no sun was asked for. One angle alone gives no direction, so it is refused.</summary>
+    private (double AzimuthDeg, double AltitudeDeg)? ReadSun(JsonElement parameters)
+    {
+        var azimuth = ReadAngle(parameters, "sunAzimuthDeg", MaxSunAzimuthDeg);
+        var altitude = ReadAngle(parameters, "sunAltitudeDeg", MaxSunAltitudeDeg);
+
+        if (azimuth is null && altitude is null)
+        {
+            return null;
+        }
+
+        return azimuth is not null && altitude is not null
+            ? (azimuth.Value, altitude.Value)
+            : throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"{Method}: sunAzimuthDeg and sunAltitudeDeg come together or not at all.");
+    }
+
+    private double? ReadAngle(JsonElement parameters, string key, double max)
+    {
+        if (!parameters.TryGetProperty(key, out var angle) || angle.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        return angle.ValueKind == JsonValueKind.Number && angle.GetDouble() is >= 0 and var degrees && degrees <= max
+            ? degrees
+            : throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"{Method}: {key} must be a number from 0 to {max}, not {angle.GetRawText()}.");
     }
 
     private XYZ? ReadPoint(JsonElement parameters, string key)
