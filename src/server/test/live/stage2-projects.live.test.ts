@@ -187,6 +187,27 @@ describe("stage 2 live checks: projects", { timeout: 120_000 }, () => {
     });
   });
 
+  it("open_project switches between open projects, and save_project refuses the one that is not active", { skip: reopenName === undefined }, async () => {
+    const other = reopenName as string;
+    await withClient(async (client) => {
+      const before = listing(folder);
+
+      const switched = (await client.call("open_project", { name: other })) as ProjectResult;
+      assert.equal(switched.alreadyOpen, true);
+      assert.deepEqual(codes((await modelInfo(client)).activeDocument?.title ?? ""), codes(other));
+
+      const refused = await refusal(client, "save_project", { name });
+      assert.equal(refused.code, INVALID_PARAMS);
+      assert.match(refused.message, /^no_active_document/);
+      console.log(`# save_project on the project that is not active: ${refused.message}`);
+      assert.deepEqual(listing(folder), before);
+
+      const back = (await client.call("open_project", { name })) as ProjectResult;
+      assert.equal(back.alreadyOpen, true);
+      assert.equal((await modelInfo(client)).activeDocument?.path, file);
+    });
+  });
+
   it("open_project refuses a project that does not exist", async () => {
     await withClient(async (client) => {
       const refused = await refusal(client, "open_project", { name: `${name}-нет` });
