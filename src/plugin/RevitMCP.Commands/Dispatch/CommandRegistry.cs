@@ -40,6 +40,8 @@ public sealed class CommandRegistry
         new GetWarningsCommand(),
         new Create3dViewCommand(),
         new GetViewSnapshotCommand(),
+        new CreateMaterialsCommand(),
+        new CreateTypeCommand(),
         new CreateLevelsCommand(),
         new CreateWallsCommand(),
         new CreateFloorsCommand(),

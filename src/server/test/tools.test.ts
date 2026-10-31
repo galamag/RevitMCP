@@ -51,6 +51,9 @@ const roof = {
   edgeSlopesDeg: [30, null, 30.5, null],
 };
 const attachment = { wallId: "10", roofId: "20" };
+const material = { name: "Краснодарский кирпич", colorRgb: { r: 170, g: 40, b: 35 } };
+const layer = { thicknessMm: 200, materialId: "7", function: "structure" };
+const typeItem = { category: "walls", baseTypeId: "408", name: "Стена 250 мм" };
 const batch = <T>(length: number, item: T): T[] => Array.from({ length }, () => item);
 
 describe("MCP tools", { timeout: 20_000 }, () => {
@@ -67,8 +70,10 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "create_3d_view",
         "create_floors",
         "create_levels",
+        "create_materials",
         "create_project",
         "create_roof",
+        "create_type",
         "create_walls",
         "delete_elements",
         "get_elements",
@@ -253,6 +258,42 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["create_roof", { items: [{ ...roof, typeId: 56766 }] }],
     ["create_roof", { items: [{ ...roof, levelId: "" }] }],
     ["create_roof", { items: [{ ...roof, slopes: [30] }] }],
+    ["create_materials", {}],
+    ["create_materials", { items: [] }],
+    ["create_materials", { items: [{ name: "Без цвета" }] }],
+    ["create_materials", { items: [{ colorRgb: material.colorRgb }] }],
+    ["create_materials", { items: [{ ...material, name: "" }] }],
+    ["create_materials", { items: [{ ...material, colorRgb: { r: 256, g: 0, b: 0 } }] }],
+    ["create_materials", { items: [{ ...material, colorRgb: { r: -1, g: 0, b: 0 } }] }],
+    ["create_materials", { items: [{ ...material, colorRgb: { r: 1.5, g: 0, b: 0 } }] }],
+    ["create_materials", { items: [{ ...material, colorRgb: { r: 1, g: 2 } }] }],
+    ["create_materials", { items: [{ ...material, colorRgb: { r: 1, g: 2, b: 3, a: 4 } }] }],
+    ["create_materials", { items: [{ ...material, colorRgb: "#ff0000" }] }],
+    ["create_materials", { items: [{ ...material, transparency: 101 }] }],
+    ["create_materials", { items: [{ ...material, transparency: -1 }] }],
+    ["create_materials", { items: [{ ...material, transparency: 50.5 }] }],
+    ["create_materials", { items: [{ ...material, baseMaterialId: 56766 }] }],
+    ["create_materials", { items: [{ ...material, baseMaterialId: "" }] }],
+    ["create_materials", { items: [{ ...material, shininess: 5 }] }],
+    ["create_materials", { items: batch(501, material) }],
+    ["create_type", {}],
+    ["create_type", { items: [] }],
+    ["create_type", { items: [{ ...typeItem, category: "doors" }] }],
+    ["create_type", { items: [{ ...typeItem, category: "стены" }] }],
+    ["create_type", { items: [{ ...typeItem, baseTypeId: 408 }] }],
+    ["create_type", { items: [{ ...typeItem, baseTypeId: "" }] }],
+    ["create_type", { items: [{ ...typeItem, name: "" }] }],
+    ["create_type", { items: [{ category: "walls", name: "Без основы" }] }],
+    ["create_type", { items: [{ ...typeItem, layers: [] }] }],
+    ["create_type", { items: [{ ...typeItem, layers: [{ ...layer, function: "core" }] }] }],
+    ["create_type", { items: [{ ...typeItem, layers: [{ ...layer, function: "Structure" }] }] }],
+    ["create_type", { items: [{ ...typeItem, layers: [{ ...layer, thicknessMm: -1 }] }] }],
+    ["create_type", { items: [{ ...typeItem, layers: [{ ...layer, thicknessMm: "200" }] }] }],
+    ["create_type", { items: [{ ...typeItem, layers: [{ ...layer, materialId: 7 }] }] }],
+    ["create_type", { items: [{ ...typeItem, layers: [{ thicknessMm: 200, function: "structure" }] }] }],
+    ["create_type", { items: [{ ...typeItem, layers: [{ ...layer, material: "Бетон" }] }] }],
+    ["create_type", { items: [{ ...typeItem, width: 250 }] }],
+    ["create_type", { items: batch(501, typeItem) }],
     ["attach_walls", {}],
     ["attach_walls", { items: [] }],
     ["attach_walls", { items: batch(501, attachment) }],
@@ -328,6 +369,114 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.ok(!result.isError);
     assert.equal(bridge.frames[0]?.method, "create_roof");
     assert.deepEqual(bridge.frames[0]?.params, { items: [{ ...roof, overhangMm: 0 }, { ...roof, overhangMm: 600.5 }] });
+  });
+
+  it("passes materials with Cyrillic intact, and a transparency of 0 unless told otherwise", async (t) => {
+    const answer = { committed: true, items: [{ index: 0, status: "already_existed", elementId: "300291", warnings: ["Цвет другой"] }], warnings: [], errors: [], dialogs: [] };
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
+
+    const result = await client.callTool({
+      name: "create_materials",
+      arguments: { items: [material, { name: "Копия", baseMaterialId: "414" }, { name: "Стекло 2", colorRgb: { r: 0, g: 128, b: 192 }, transparency: 60 }] },
+    });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "create_materials");
+    assert.deepEqual(bridge.frames[0]?.params, {
+      items: [
+        { ...material, transparency: 0 },
+        { name: "Копия", baseMaterialId: "414", transparency: 0 },
+        { name: "Стекло 2", colorRgb: { r: 0, g: 128, b: 192 }, transparency: 60 },
+      ],
+    });
+    assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
+  it("passes a type with and without layers, with the order of the layers kept", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+    const layers = [
+      { thicknessMm: 20, materialId: "5", function: "finish2" },
+      layer,
+      { thicknessMm: 0, materialId: "9", function: "membrane" },
+      { thicknessMm: 30.5, materialId: "6", function: "finish1" },
+    ];
+    const items = [typeItem, { ...typeItem, category: "roofs", name: "Крыша 300 мм", layers }];
+
+    const result = await client.callTool({ name: "create_type", arguments: { items } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "create_type");
+    assert.deepEqual(bridge.frames[0]?.params, { items });
+  });
+
+  it("takes every category and every layer function that create_type names", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+    const items = ["walls", "floors", "ceilings", "roofs"].map((category) => ({
+      ...typeItem,
+      category,
+      layers: ["structure", "substrate", "insulation", "finish1", "finish2", "membrane"].map((fn) => ({ thicknessMm: fn === "membrane" ? 0 : 10, materialId: "7", function: fn })),
+    }));
+
+    const result = await client.callTool({ name: "create_type", arguments: { items } });
+
+    assert.ok(!result.isError);
+    assert.deepEqual(bridge.frames[0]?.params, { items });
+  });
+
+  it("takes 500 items in create_materials and create_type, the most they allow", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+
+    assert.ok(!(await client.callTool({ name: "create_materials", arguments: { items: batch(500, material) } })).isError);
+    assert.ok(!(await client.callTool({ name: "create_type", arguments: { items: batch(500, typeItem) } })).isError);
+    assert.equal((bridge.frames[0]?.params["items"] as unknown[]).length, 500);
+    assert.equal((bridge.frames[1]?.params["items"] as unknown[]).length, 500);
+  });
+
+  it("tells the model the truth about create_materials", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "create_materials")?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /500/);
+    for (const word of ["created", "failed", "rolled_back", "not attempted", "actual", "already_existed"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /Realistic/);
+    assert.match(description, /Shading/);
+    assert.match(description, /so the base material does not change/);
+    assert.match(description, /such as brick or wood has none, and a call that asks for a colour .* is refused before anything changes/);
+    assert.match(description, /whole number from 0 to 255/);
+    assert.match(description, /0, opaque, to 100/);
+    assert.match(description, /applied to every material the tool makes/);
+    assert.match(description, /appearanceColorRgb is null/);
+    assert.match(description, /left as it is/);
+    assert.match(description, /create_type/);
+  });
+
+  it("tells the model the truth about create_type", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "create_type")?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    assert.match(description, /500/);
+    for (const word of ["created", "failed", "rolled_back", "not attempted", "actual", "already_existed"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    for (const fn of ["structure", "substrate", "insulation", "finish1", "finish2", "membrane"]) {
+      assert.ok(description.includes(fn), `should name the function ${fn}`);
+    }
+    assert.match(description, /from the outside in for a wall and from the top down for a floor, ceiling or roof/);
+    assert.match(description, /membrane layer has no thickness/);
+    assert.match(description, /curtain wall or a glazed roof, cannot be given layers/);
+    assert.match(description, /widthMm is the total thickness/);
+    assert.match(description, /left as it is/);
+    assert.match(description, /same family as the base type/);
+    assert.match(description, /create_walls/);
   });
 
   it("passes attachments unchanged and returns the honest result", async (t) => {

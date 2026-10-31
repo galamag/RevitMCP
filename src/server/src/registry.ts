@@ -46,6 +46,13 @@ const MIN_OUTLINE_POINTS = 3;
 /** A roof slope stays below this, in degrees, which the plugin checks too. */
 const MAX_ROOF_SLOPE_DEG = 90;
 
+/** The limits of a colour channel and of transparency, which the plugin checks too. */
+const MAX_COLOR_CHANNEL = 255;
+const MAX_TRANSPARENCY = 100;
+
+/** The functions of a layer of a type, the same as `Functions` in the plugin. */
+const LAYER_FUNCTIONS = ["structure", "substrate", "insulation", "finish1", "finish2", "membrane"] as const;
+
 const requestId = z
   .string()
   .min(1)
@@ -297,6 +304,90 @@ export const tools: readonly ToolDefinition[] = [
         .describe("The width of the image in pixels. The height follows from the shape of the view."),
     },
     present: presentSnapshot(),
+  },
+  {
+    name: "create_materials",
+    description:
+      "Creates materials in the active project, each with a colour that shows in the Realistic display style as well as in Shading. " +
+      "colorRgb is { r, g, b }, each a whole number from 0 to 255. Without baseMaterialId the material is new and colorRgb is required: " +
+      "it gets its own copy of a plain appearance, so the colour is a flat colour in Realistic, without a texture. " +
+      "With baseMaterialId, an id from list_materials, the tool duplicates that material together with its own copy of its appearance, so the base material does not change, and colorRgb, if given, recolours the copy only. " +
+      "Without colorRgb the copy keeps the colour of its base. A colour can only be set on an appearance that has a plain colour: " +
+      "a base such as brick or wood has none, and a call that asks for a colour or a transparency on such a base is refused before anything changes, never done half way. " +
+      "A base with no appearance at all is refused in the same way when a colour or a transparency is asked of it. " +
+      "transparency is a whole number from 0, opaque, to 100, fully see-through, and 0 when left out. It is applied to every material the tool makes, a copy of a see-through base included, so pass the transparency you want. " +
+      "In Realistic a see-through material shows what lies behind it and loses its tint, so judge the colour of a see-through material with transparency 0. " +
+      "A new material, made without baseMaterialId, has the material class Unassigned, and a copy keeps the class of its base. " +
+      "A name that already exists, matched exactly, gives status already_existed with that material's id in elementId, and the material is left as it is. " +
+      "actual then shows what it really is, so read it: when its colour in Shading or in Realistic, or its transparency, differs from the request, the item carries a warning and nothing was changed. " +
+      "When every item already exists, nothing changes and no Undo step is added. already_existed still stands when the batch fails. " +
+      "The same name twice in one list is refused. A name that differs from an existing one only in case is another name, as Revit takes it. " +
+      "actual is { name, materialClass, colorRgb, appearanceColorRgb, transparency, appearanceAssetId, useRenderAppearanceForShading }: " +
+      "colorRgb is the colour of Shading and appearanceColorRgb the colour of Realistic, each { r, g, b } or null, and appearanceColorRgb is null for an appearance that has no single colour, such as one with a texture. " +
+      "Use the material in create_type, as the materialId of a layer. " +
+      BATCH_RULES +
+      " Related tools: list_materials, create_type, get_view_snapshot, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z
+          .strictObject({
+            name: z.string().min(1).describe("The exact name of the material. Russian is fine. Revit forbids some characters in names, such as { } [ ] | ; < > ? ` ~ \\ :"),
+            baseMaterialId: elementId("The id of a material from list_materials to duplicate. Leave it out for a new material, which then needs colorRgb").optional(),
+            colorRgb: z
+              .strictObject({
+                r: z.number().int().min(0).max(MAX_COLOR_CHANNEL),
+                g: z.number().int().min(0).max(MAX_COLOR_CHANNEL),
+                b: z.number().int().min(0).max(MAX_COLOR_CHANNEL),
+              })
+              .optional()
+              .describe(`The colour as { r, g, b }, each a whole number from 0 to ${MAX_COLOR_CHANNEL}. Required without baseMaterialId.`),
+            transparency: z.number().int().min(0).max(MAX_TRANSPARENCY).default(0).describe(`How see-through the material is, a whole number from 0, opaque, to ${MAX_TRANSPARENCY}.`),
+          })
+          .refine((item) => item.baseMaterialId !== undefined || item.colorRgb !== undefined, {
+            message: "Give colorRgb, or baseMaterialId to take the colour of a material that exists.",
+          }),
+      ),
+    },
+  },
+  {
+    name: "create_type",
+    description:
+      "Creates wall, floor, ceiling and roof types in the active project as copies of a base type, with their own layers when layers is given. " +
+      "category is walls, floors, ceilings or roofs, and baseTypeId is the id of a type of that category from list_types. Without layers the new type is an exact copy of the base type. " +
+      "layers lists the layers of the structure, from the outside in for a wall and from the top down for a floor, ceiling or roof, and it replaces all the layers of the base type. " +
+      "Each layer is { thicknessMm, materialId, function }: thicknessMm in millimetres, materialId from list_materials or create_materials, and function one of structure, substrate, insulation, finish1, finish2 and membrane. " +
+      "A membrane layer has no thickness, so give it thicknessMm 0, and every other layer needs a thickness. Revit checks the whole stack before anything changes, and a stack it does not take, such as a layer that is too thin, is refused with the reason for each layer. " +
+      "A base type that has no layers, such as a curtain wall or a glazed roof, cannot be given layers and is refused when layers is given. " +
+      "A name that a type of the same family as the base type already has, matched exactly, gives status already_existed with that type's id in elementId, and the type is left as it is. " +
+      "Another family may use the same name: a basic wall type can be named like a curtain wall type, and it is then a new type. " +
+      "actual then shows what it really is, so read it: when its layers differ from the request, or from the base type if layers was left out, the item carries a warning and nothing was changed. " +
+      "When every item already exists, nothing changes and no Undo step is added. already_existed still stands when the batch fails. " +
+      "The same name twice in one list for one family of type is refused. " +
+      "actual is { category, family, name, widthMm, layers }: widthMm is the total thickness of all layers in millimetres, and layers lists { thicknessMm, materialId, function } in the same order, " +
+      "with a materialId of null for a layer that takes its material from the category. Both are null for a type with no layers. function can come back as a name outside the six above, for a layer copied from the base type. " +
+      "A new type changes nothing in the model until an element uses it: take its elementId as typeId in create_walls or create_floors. " +
+      BATCH_RULES +
+      " Related tools: list_types, list_materials, create_materials, create_walls, create_floors, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.strictObject({
+          category: z.enum(["walls", "floors", "ceilings", "roofs"]).describe("The category of the type. These words stay the same whatever the language of Revit."),
+          baseTypeId: elementId("The id of the type to copy, from list_types with the same category"),
+          name: z.string().min(1).describe("The exact name of the new type. Russian is fine. Revit forbids some characters in names, such as { } [ ] | ; < > ? ` ~ \\ :"),
+          layers: z
+            .array(
+              z.strictObject({
+                thicknessMm: z.number().min(0).describe("The thickness of the layer in millimetres. 0 for a membrane, above 0 for any other layer."),
+                materialId: elementId("The id of the material of the layer, from list_materials"),
+                function: z.enum(LAYER_FUNCTIONS).describe("What the layer does. membrane is a thin sheet with no thickness."),
+              }),
+            )
+            .min(1)
+            .optional()
+            .describe("The layers, from the outside in for a wall and from the top down for the others. Leave it out to copy the base type as it is."),
+        }),
+      ),
+    },
   },
   {
     name: "create_levels",

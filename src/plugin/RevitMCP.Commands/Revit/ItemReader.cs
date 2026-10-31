@@ -35,6 +35,29 @@ internal readonly record struct ItemReader(JsonElement Item, string Where)
 
     public double NumberOr(string key, double fallback) => Has(key) ? Number(key) : fallback;
 
+    /// <summary>A whole number in <paramref name="min"/> to <paramref name="max"/>, as the contract states it.</summary>
+    public int WholeNumber(string key, JsonElement value, int min, int max)
+    {
+        var number = Finite(key, value);
+
+        return Math.Floor(number) == number && number >= min && number <= max
+            ? (int)number
+            : throw Refuse($"{key} must be a whole number from {min} to {max}, not {value.GetRawText()}.");
+    }
+
+    /// <summary>
+    /// Reads the name of something to create. Revit forbids an empty name, spaces at either end and some characters, and
+    /// a name it refuses inside the transaction would cost the item its error code.
+    /// </summary>
+    public string Name(string key, string what)
+    {
+        var name = Text(key);
+
+        return string.IsNullOrWhiteSpace(name) || name != name.Trim() || !NamingUtils.IsValidName(name)
+            ? throw Refuse($"'{name}' cannot be {what} name: Revit forbids an empty name, spaces at either end and the characters {{ }} [ ] | ; < > ? ` ~ \\ :")
+            : name;
+    }
+
     public bool FlagOr(string key, bool fallback)
     {
         if (!Has(key))
@@ -116,6 +139,25 @@ internal readonly record struct ItemReader(JsonElement Item, string Where)
             .Select(level => $"{level.Id} ('{level.Name}', {Units.InternalToMm(level.ProjectElevation):0.###} mm)");
 
         throw Refuse($"{key} {Item.GetProperty(key).GetRawText()} is not a level. The levels of this project: {string.Join(", ", valid)}.");
+    }
+
+    /// <summary>Reads a material by ID, as <c>list_materials</c> lists them.</summary>
+    public Material Material(Document document, string key)
+    {
+        if (ElementIds.TryParse(ReadId(key), out var id) && document.GetElement(id) is Material material)
+        {
+            return material;
+        }
+
+        var valid = new FilteredElementCollector(document)
+            .OfClass(typeof(Material))
+            .Cast<Material>()
+            .OrderBy(material => material.Name, StringComparer.Ordinal)
+            .ThenBy(material => material.Id.Value)
+            .Select(material => $"{material.Id} ('{material.Name}')")
+            .ToList();
+
+        throw Refuse($"{key} {Item.GetProperty(key).GetRawText()} is not a material. The materials of this project: {Listing(valid, ", see list_materials")}.");
     }
 
     /// <summary>Reads a type by ID, with the same <paramref name="category"/> word as <c>list_types</c>.</summary>

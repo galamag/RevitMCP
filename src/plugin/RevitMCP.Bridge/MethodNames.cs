@@ -16,6 +16,8 @@ public static class MethodNames
     public const string GetWarnings = "get_warnings";
     public const string Create3dView = "create_3d_view";
     public const string GetViewSnapshot = "get_view_snapshot";
+    public const string CreateMaterials = "create_materials";
+    public const string CreateType = "create_type";
     public const string CreateLevels = "create_levels";
     public const string CreateWalls = "create_walls";
     public const string CreateFloors = "create_floors";
@@ -41,6 +43,8 @@ public static class MethodNames
         GetWarnings,
         Create3dView,
         GetViewSnapshot,
+        CreateMaterials,
+        CreateType,
         CreateLevels,
         CreateWalls,
         CreateFloors,

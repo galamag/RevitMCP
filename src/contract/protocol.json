@@ -14,6 +14,8 @@
     "get_warnings",
     "create_3d_view",
     "get_view_snapshot",
+    "create_materials",
+    "create_type",
     "create_levels",
     "create_walls",
     "create_floors",
