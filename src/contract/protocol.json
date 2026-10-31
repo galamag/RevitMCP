@@ -16,6 +16,9 @@
     "create_walls",
     "create_floors",
     "create_roof",
-    "attach_walls"
+    "attach_walls",
+    "delete_elements",
+    "undo_last_operation",
+    "get_last_undo_result"
   ]
 }

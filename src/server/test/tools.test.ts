@@ -70,7 +70,9 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "create_project",
         "create_roof",
         "create_walls",
+        "delete_elements",
         "get_elements",
+        "get_last_undo_result",
         "get_model_info",
         "get_request_status",
         "get_status",
@@ -78,6 +80,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "list_types",
         "open_project",
         "save_project",
+        "undo_last_operation",
       ],
     );
     for (const tool of tools) {
@@ -249,6 +252,12 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["attach_walls", { items: [{ roofId: "20" }] }],
     ["attach_walls", { items: [{ wallId: 10, roofId: "20" }] }],
     ["attach_walls", { items: [{ ...attachment, top: true }] }],
+    ["delete_elements", {}],
+    ["delete_elements", { ids: [] }],
+    ["delete_elements", { ids: [123] }],
+    ["delete_elements", { ids: [""] }],
+    ["delete_elements", { ids: ["1"], dryRun: "false" }],
+    ["delete_elements", { ids: Array.from({ length: 1001 }, (_, index) => String(index + 1)) }],
   ] as const) {
     it(`rejects ${tool} ${JSON.stringify(args).slice(0, 120)} before it reaches Revit`, async (t) => {
       const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, {}));
@@ -323,6 +332,55 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.equal(bridge.frames[0]?.method, "attach_walls");
     assert.deepEqual(bridge.frames[0]?.params, { items: [attachment] });
     assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
+  it("asks delete_elements for a dry run unless told otherwise", async (t) => {
+    const answer = { dryRun: true, committed: false, allAffected: ["1", "2"], dependents: ["2"], errors: [] };
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
+
+    const result = await client.callTool({ name: "delete_elements", arguments: { ids: ["1"] } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "delete_elements");
+    assert.deepEqual(bridge.frames[0]?.params, { ids: ["1"], dryRun: true });
+    assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
+  it("passes dryRun false only when asked, and 1000 ids, the most it allows", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+    const ids = Array.from({ length: 1000 }, (_, index) => String(index + 1));
+
+    const result = await client.callTool({ name: "delete_elements", arguments: { ids, dryRun: false } });
+
+    assert.ok(!result.isError);
+    assert.deepEqual(bridge.frames[0]?.params, { ids, dryRun: false });
+  });
+
+  it("tells the model the truth about delete_elements", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "delete_elements")?.description ?? "";
+
+    assert.match(description, /dryRun is true unless you pass false/);
+    assert.match(description, /deletes nothing/);
+    assert.match(description, /A level takes the walls, floors and views on it/);
+    assert.match(description, /In a dry run committed is always false, which is no failure/);
+    assert.match(description, /committed false means nothing was deleted/);
+  });
+
+  it("tells the model the truth about undo_last_operation", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "undo_last_operation")?.description ?? "";
+
+    assert.match(description, /every id you still hold from it is invalid/);
+    assert.match(description, /undo_refused/);
+    assert.match(description, /only the user can undo their own change/);
+    assert.match(description, /open_project/);
+    assert.match(description, /get_last_undo_result/);
+    assert.match(description, /There is no redo tool/);
   });
 
   it("takes 500 items in a create_ tool, the most it allows", async (t) => {

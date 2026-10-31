@@ -22,7 +22,7 @@ public sealed class GetElementsCommand : ICommand
         var elements = new List<object>();
         var notFound = new List<string>();
 
-        foreach (var (text, id) in ReadIds(parameters))
+        foreach (var (text, id) in ElementIds.ReadList(parameters, Method))
         {
             if (document.GetElement(id) is { } element)
             {
@@ -35,23 +35,6 @@ public sealed class GetElementsCommand : ICommand
         }
 
         return JsonSerializer.SerializeToElement(new { elements, notFound });
-    }
-
-    /// <summary>All of it is read before Revit is asked anything. An ID asked twice is answered once.</summary>
-    private List<(string Text, ElementId Id)> ReadIds(JsonElement parameters)
-    {
-        if (!parameters.TryGetProperty("ids", out var ids) || ids.ValueKind != JsonValueKind.Array || ids.GetArrayLength() == 0)
-        {
-            throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"{Method} needs a list of ids in ids.");
-        }
-
-        return ids.EnumerateArray()
-            .Select(id => id.ValueKind == JsonValueKind.String
-                ? id.GetString()!
-                : throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"{Method}: ids are strings, and {id.GetRawText()} is not one."))
-            .Select(text => (Text: text, Id: ElementIds.Parse(text, Method)))
-            .DistinctBy(entry => entry.Id.Value)
-            .ToList();
     }
 
     private static object Describe(Document document, Element element)

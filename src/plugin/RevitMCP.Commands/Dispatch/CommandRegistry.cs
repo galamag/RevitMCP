@@ -27,8 +27,8 @@ public sealed class CommandRegistry
         }
     }
 
-    /// <summary>Builds the registry of every command the plugin ships.</summary>
-    public static CommandRegistry CreateDefault() => new(
+    /// <summary>Builds the registry of every command the plugin ships. The undo commands read <paramref name="undoTracker"/>.</summary>
+    public static CommandRegistry CreateDefault(UndoTracker undoTracker) => new(
     [
         new GetModelInfoCommand(),
         new CreateProjectCommand(),
@@ -43,6 +43,9 @@ public sealed class CommandRegistry
         new CreateFloorsCommand(),
         new CreateRoofCommand(),
         new AttachWallsCommand(),
+        new DeleteElementsCommand(),
+        new UndoLastOperationCommand(undoTracker),
+        new GetLastUndoResultCommand(undoTracker),
     ]);
 
     /// <summary>Returns the command for this method, or <c>null</c>.</summary>

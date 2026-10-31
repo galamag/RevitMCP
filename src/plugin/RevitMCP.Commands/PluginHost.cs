@@ -30,6 +30,7 @@ public static class PluginHost
     private static BridgeServer? _server;
     private static Timer? _drainTimer;
     private static DialogGuard? _dialogGuard;
+    private static UndoTracker? _undoTracker;
 
     public static void Start(UIControlledApplication application)
     {
@@ -98,6 +99,15 @@ public static class PluginHost
 
         try
         {
+            DetachUndoTracker(application);
+        }
+        catch (Exception e)
+        {
+            Log.Error("Could not detach the undo tracker.", e);
+        }
+
+        try
+        {
             DeleteConnectionFile();
         }
         catch (Exception e)
@@ -108,7 +118,8 @@ public static class PluginHost
 
     private static void StartBridge(UIControlledApplication application)
     {
-        var commands = CommandRegistry.CreateDefault();
+        var undoTracker = new UndoTracker();
+        var commands = CommandRegistry.CreateDefault(undoTracker);
         if (!MayClaimConnectionFile())
         {
             return;
@@ -116,6 +127,9 @@ public static class PluginHost
 
         _dialogGuard = new DialogGuard();
         application.DialogBoxShowing += _dialogGuard.OnDialogBoxShowing;
+
+        _undoTracker = undoTracker;
+        undoTracker.Attach(application.ControlledApplication);
 
         var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(TokenBytes));
         var clock = TimeProvider.System;
@@ -182,6 +196,15 @@ public static class PluginHost
         {
             application.DialogBoxShowing -= _dialogGuard.OnDialogBoxShowing;
             _dialogGuard = null;
+        }
+    }
+
+    private static void DetachUndoTracker(UIControlledApplication application)
+    {
+        if (_undoTracker is not null)
+        {
+            _undoTracker.Detach(application.ControlledApplication);
+            _undoTracker = null;
         }
     }
 

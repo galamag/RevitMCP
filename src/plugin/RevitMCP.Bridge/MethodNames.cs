@@ -19,6 +19,9 @@ public static class MethodNames
     public const string CreateFloors = "create_floors";
     public const string CreateRoof = "create_roof";
     public const string AttachWalls = "attach_walls";
+    public const string DeleteElements = "delete_elements";
+    public const string UndoLastOperation = "undo_last_operation";
+    public const string GetLastUndoResult = "get_last_undo_result";
 
     /// <summary>Every method the bridge accepts.</summary>
     public static readonly IReadOnlyList<string> All =
@@ -39,6 +42,9 @@ public static class MethodNames
         CreateFloors,
         CreateRoof,
         AttachWalls,
+        DeleteElements,
+        UndoLastOperation,
+        GetLastUndoResult,
     ];
 
     /// <summary>Methods the socket thread answers itself, so they work while the Revit main thread is busy.</summary>

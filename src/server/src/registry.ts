@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { presentSnapshot } from "./snapshot.ts";
+import { undoLastOperation } from "./undo.ts";
+import type { UndoClient } from "./undo.ts";
 
 /** One part of a tool result, as MCP defines it. */
 export type ToolContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
@@ -16,6 +18,8 @@ export interface ToolDefinition {
   readonly timeoutMs?: number;
   /** Turns the plugin's answer into the tool result. When unset, the answer is returned as JSON text. */
   readonly present?: (answer: unknown) => Promise<ToolContent[]>;
+  /** Replaces the forwarding, for a tool that takes more than one request. It gets `timeoutMs` for each of them. */
+  readonly run?: (client: UndoClient, timeoutMs: number | undefined) => Promise<unknown>;
 }
 
 /** The plugin answers these on its socket thread, so they come back at once even while Revit is busy. */
@@ -402,5 +406,48 @@ export const tools: readonly ToolDefinition[] = [
         }),
       ),
     },
+  },
+  {
+    name: "delete_elements",
+    description:
+      "Deletes elements of the active project by id, or shows what a delete would take. dryRun is true unless you pass false, so a call that leaves it out deletes nothing. " +
+      "Use it that way first: Revit also deletes everything that depends on an element, without asking. A level takes the walls, floors and views on it, and a wall type takes every wall of that type. " +
+      "A dry run really runs the delete in Revit and rolls it back: the model, the Undo history and the unsaved state stay as they were. It stops before Revit's final check at commit, so a real delete can still be refused. " +
+      `Take 1 to ${MAX_ELEMENT_IDS} ids from other tools. An id asked twice counts once. The whole list is checked first: text that cannot be an id, an id with no element, or an element Revit cannot delete refuses the call, and nothing changes. ` +
+      "Returns { dryRun, committed, summary, requested, allAffected, dependents, warnings, errors, dialogs }. allAffected lists every id that goes or would go, the requested ones included, and dependents only those you did not ask for. " +
+      "Read them before a real delete. Some of them are not model elements you know, such as views or internal elements: read them with get_elements. " +
+      "On a real delete committed true means they are gone, as one Undo step, and the project has unsaved changes. committed false means nothing was deleted, allAffected is empty and errors holds the reason. " +
+      "In a dry run committed is always false, which is no failure: an empty errors with allAffected filled means it would go ahead, and summary says so in words. " +
+      "dialogs ([{ dialogId, message }]) lists the Revit dialogs that came up and were refused, usually none. The ids of what is gone stay invalid unless the delete is undone. " +
+      "Related tools: undo_last_operation, get_elements, get_model_info.",
+    inputSchema: {
+      ids: z.array(z.string().min(1)).min(1).max(MAX_ELEMENT_IDS).describe("Element ids as strings, passed on unchanged from other tools."),
+      dryRun: z.boolean().default(true).describe("true shows what would go and deletes nothing. Pass false to delete."),
+    },
+  },
+  {
+    name: "undo_last_operation",
+    description:
+      "Undoes the last operation of these tools in the active project with Revit's own Undo, one operation per call: a whole batch comes off as one, and a delete comes back with the same ids. " +
+      "It needs no arguments and answers only after Revit confirmed it. Returns { state, undoId, transactionName, createdIds, restoredIds, documentTitle }. state is undone. transactionName names what came off, as MCP: and the tool name. " +
+      "createdIds lists the elements that operation created: they no longer exist, so every id you still hold from it is invalid, and using one fails. An element it changed goes back to how it was, and its id stays. restoredIds lists what that operation had deleted, back in the model under the same ids. " +
+      "It refuses, and nothing changes, when the error text starts with undo_refused: when nothing of these tools is in the history of the active project, which is always so right after create_project or open_project opened it, as Revit keeps no history in the file; " +
+      "when the last change in the project came from somewhere else, such as the user in Revit, because Undo would take that instead: only the user can undo their own change; " +
+      "when the last operation of these tools lies in another project: make that one active with open_project first; and when an earlier undo is still unconfirmed. " +
+      "A failed call that does not start with undo_refused means the undo was posted, or may have been, without a confirmation, and the text says which. Then do not call this again blindly, as it would take the next operation: " +
+      "ask get_last_undo_result first. After an undo the project may read as saved or as changed, whichever is true: see isModified in get_model_info. There is no redo tool. " +
+      "Related tools: get_last_undo_result, delete_elements, get_model_info.",
+    inputSchema: {},
+    run: undoLastOperation,
+  },
+  {
+    name: "get_last_undo_result",
+    description:
+      "Says what became of the last undo posted in this Revit session, without undoing anything. undo_last_operation already asks this itself, so call it only after that tool reported no confirmation, such as after a timeout. " +
+      "Returns { state, undoId, transactionName, createdIds, restoredIds, documentTitle }. state undone means Revit reported that undo, and the other keys mean what they mean there. " +
+      "not_confirmed means it was posted and Revit reported nothing, so treat the model as unchanged, and it is possible that Revit dropped the command. none means no undo was posted since Revit started, and the other keys are then empty. " +
+      "An undo is reported as what it was asked to take. A change that a person undid in Revit is not an undo of these tools, so it does not show here. " +
+      "It waits for Revit like any model request, and it also lets a command Revit is holding go first. Related tools: undo_last_operation, get_model_info.",
+    inputSchema: {},
   },
 ];

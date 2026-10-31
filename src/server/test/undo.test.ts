@@ -1,0 +1,301 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type { TestContext } from "node:test";
+
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+
+import { BridgeClient } from "../src/client.ts";
+import { BridgeRpcError, RevitNotRunningError } from "../src/errors.ts";
+import { tools } from "../src/registry.ts";
+import { createServer } from "../src/server.ts";
+import { UndoNotConfirmedError, undoLastOperation } from "../src/undo.ts";
+import { FakeBridge } from "./fakeBridge.ts";
+import type { FrameHandler } from "./fakeBridge.ts";
+
+const posted = { undoId: 7, transactionName: "MCP: create_walls", createdIds: ["10"], restoredIds: [], documentTitle: "Дом" };
+const undone = { state: "undone", ...posted };
+const INVALID_PARAMS = -32602;
+const NOT_EXECUTED = -32003;
+
+/** Connects an MCP client to the real server over memory, with a fake bridge whose calls time out fast. */
+async function connect(t: TestContext, handler: FrameHandler, timeoutMs?: number) {
+  const bridge = new FakeBridge(handler);
+  t.after(() => bridge.close());
+  await bridge.start();
+
+  const bridgeClient = new BridgeClient(bridge.connectionPath, { connectRetries: 0, connectRetryDelayMs: 10 });
+  t.after(() => bridgeClient.close());
+
+  const toolList = tools.map((tool) => (tool.name === "undo_last_operation" && timeoutMs !== undefined ? { ...tool, timeoutMs } : tool));
+  const server = createServer(bridgeClient, toolList);
+  const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test", version: "0.0.0" });
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+  await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+
+  return { bridge, bridgeClient, client };
+}
+
+const undo = (client: Client) => client.callTool({ name: "undo_last_operation", arguments: {} });
+
+function textOf(result: unknown): string {
+  const content = (result as { content: Array<{ type: string; text: string }> }).content;
+  return content.map((part) => part.text).join("\n");
+}
+
+/** A bridge that answers the post, and leaves the confirmation to `confirm`. */
+function afterPost(confirm: FrameHandler): FrameHandler {
+  return (frame, connection) => {
+    if (frame.method === "undo_last_operation") {
+      connection.result(frame, posted);
+    } else {
+      confirm(frame, connection);
+    }
+  };
+}
+
+function assertNoClaim(text: string): void {
+  assert.doesNotMatch(text, /safe to send/i);
+  assert.doesNotMatch(text, /nothing in the Revit project changed/i);
+}
+
+describe("undo_last_operation", { timeout: 20_000 }, () => {
+  it("posts, confirms right after, and returns the confirmation", async (t) => {
+    const { bridge, client } = await connect(t, afterPost((frame, connection) => connection.result(frame, undone)));
+
+    const result = await undo(client);
+
+    assert.ok(!result.isError);
+    assert.deepEqual(JSON.parse(textOf(result)), undone);
+    assert.deepEqual(bridge.frames.map((frame) => frame.method), ["undo_last_operation", "get_last_undo_result"]);
+    assert.deepEqual(bridge.frames[0]?.params, {});
+    assert.deepEqual(bridge.frames[1]?.params, {});
+  });
+
+  it("passes a refusal on and sends no confirmation", async (t) => {
+    const refusal = "undo_refused: the last change in 'Дом' is 'Wall', which did not come from these tools.";
+    const { bridge, client } = await connect(t, (frame, connection) => connection.error(frame, INVALID_PARAMS, refusal));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.equal(textOf(result), refusal);
+    assert.equal(bridge.frames.length, 1);
+  });
+
+  it("says not undone when Revit did not report the undo", async (t) => {
+    const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, { ...undone, state: "not_confirmed" })));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /^Not undone: /);
+    assert.match(textOf(result), /MCP: create_walls/);
+    assert.match(textOf(result), /treat the model as unchanged/);
+  });
+
+  it("never claims success for a state it does not know", async (t) => {
+    const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, { ...undone, state: "none" })));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /^Not undone: /);
+  });
+
+  it("calls the state unknown when the confirmation was cancelled in the queue", async (t) => {
+    const { client } = await connect(
+      t,
+      afterPost((frame, connection) => {
+        if (frame.method === "cancel_request") {
+          connection.result(frame, { requestId: frame.params["requestId"], state: "cancelled" });
+        }
+      }),
+      50,
+    );
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /not known whether it happened/);
+    assert.match(textOf(result), /get_last_undo_result/);
+    assert.match(textOf(result), /Do not call undo_last_operation again/);
+    assertNoClaim(textOf(result));
+  });
+
+  it("calls the state unknown when the confirmation is stuck in Revit", async (t) => {
+    const { client } = await connect(
+      t,
+      afterPost((frame, connection) => {
+        if (frame.method === "cancel_request") {
+          connection.result(frame, { requestId: frame.params["requestId"], state: "running" });
+        }
+      }),
+      50,
+    );
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /not known whether it happened/);
+    assert.match(textOf(result), /get_last_undo_result/);
+    assertNoClaim(textOf(result));
+  });
+
+  it("calls the state unknown when the connection goes during the confirmation", async (t) => {
+    const { client } = await connect(t, afterPost((_frame, connection) => connection.drop()));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /not known whether it happened/);
+    assertNoClaim(textOf(result));
+  });
+
+  it("calls the state unknown when Revit is gone by the confirmation", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => {
+      connection.result(frame, posted);
+      void bridge.stopListening();
+    });
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /not known whether it happened/);
+    assertNoClaim(textOf(result));
+  });
+
+  it("calls the state unknown when the confirmation fails in the plugin", async (t) => {
+    const { client } = await connect(t, afterPost((frame, connection) => connection.error(frame, -32603, "boom")));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /not known whether it happened/);
+  });
+
+  it("calls the state unknown when the confirmation expired in the queue", async (t) => {
+    const { client } = await connect(t, afterPost((frame, connection) => connection.error(frame, NOT_EXECUTED, "expired")));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /not known whether it happened/);
+    assertNoClaim(textOf(result));
+  });
+
+  it("calls the state unknown when the confirmation is about another undo", async (t) => {
+    const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, { ...undone, undoId: 8 })));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /another undo/);
+  });
+
+  for (const [what, answer] of [
+    ["null", null],
+    ["no state", { undoId: 7, createdIds: [], restoredIds: [] }],
+    ["a state that is no text", { ...undone, state: 1 }],
+    ["no id lists", { state: "undone", undoId: 7 }],
+    ["a list", []],
+  ] as const) {
+    it(`calls the state unknown for a confirmation that reads ${what}`, async (t) => {
+      const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, answer)));
+
+      const result = await undo(client);
+
+      assert.equal(result.isError, true);
+      assert.match(textOf(result), /could not be read/);
+    });
+  }
+
+  it("calls the state unknown when the post cannot be read, and asks nothing more", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { undoId: "7" }));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /not known whether it was posted/);
+    assert.equal(bridge.frames.length, 1);
+  });
+
+  it("says nothing was executed when the post was cancelled in the queue", async (t) => {
+    const { bridge, client } = await connect(
+      t,
+      (frame, connection) => {
+        if (frame.method === "cancel_request") {
+          connection.result(frame, { requestId: frame.params["requestId"], state: "cancelled" });
+        }
+      },
+      50,
+    );
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /was not executed/);
+    assert.deepEqual(bridge.frames.map((frame) => frame.method), ["undo_last_operation", "cancel_request"]);
+  });
+
+  it("calls the post unknown when it times out and may have run", async (t) => {
+    const { client } = await connect(
+      t,
+      (frame, connection) => {
+        if (frame.method === "cancel_request") {
+          connection.result(frame, { requestId: frame.params["requestId"], state: "running" });
+        }
+      },
+      50,
+    );
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /not known whether the undo was posted/);
+    assert.match(textOf(result), /Do not call undo_last_operation again/);
+  });
+
+  it("throws a refusal as the plugin error, and an unconfirmed undo as its own error", async (t) => {
+    let refuse = true;
+    const { bridgeClient } = await connect(t, (frame, connection) => {
+      if (refuse) {
+        connection.error(frame, INVALID_PARAMS, "undo_refused: nothing");
+      } else if (frame.method === "undo_last_operation") {
+        connection.result(frame, posted);
+      } else {
+        connection.result(frame, { ...undone, state: "not_confirmed" });
+      }
+    });
+
+    await assert.rejects(undoLastOperation(bridgeClient), (error: unknown) => error instanceof BridgeRpcError && error.code === INVALID_PARAMS);
+
+    refuse = false;
+    await assert.rejects(undoLastOperation(bridgeClient), UndoNotConfirmedError);
+  });
+
+  it("lets a Revit that is not running surface as such, with nothing sent", async (t) => {
+    const { bridge, bridgeClient } = await connect(t, () => {});
+    await bridge.writeConnectionFile({ pid: 2 ** 31 - 2 });
+
+    await assert.rejects(undoLastOperation(bridgeClient), RevitNotRunningError);
+    assert.equal(bridge.frames.length, 0);
+  });
+});
+
+describe("get_last_undo_result", { timeout: 20_000 }, () => {
+  it("forwards to the bridge and answers without undoing", async (t) => {
+    const answer = { state: "none", undoId: null, transactionName: null, createdIds: [], restoredIds: [], documentTitle: null };
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
+
+    const result = await client.callTool({ name: "get_last_undo_result", arguments: {} });
+
+    assert.ok(!result.isError);
+    assert.deepEqual(JSON.parse(textOf(result)), answer);
+    assert.deepEqual(bridge.frames.map((frame) => frame.method), ["get_last_undo_result"]);
+  });
+});

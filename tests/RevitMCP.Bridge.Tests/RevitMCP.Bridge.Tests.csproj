@@ -14,4 +14,9 @@
     <ProjectReference Include="..\..\src\plugin\RevitMCP.Bridge\RevitMCP.Bridge.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- RevitMCP.Commands needs Revit to compile. This one file does not, so its logic can be tested here. -->
+    <Compile Include="..\..\src\plugin\RevitMCP.Commands\Revit\UndoHistory.cs" Link="UndoHistory.cs" />
+  </ItemGroup>
+
 </Project>

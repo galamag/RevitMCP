@@ -4,6 +4,7 @@ import type { BridgeClient } from "./client.ts";
 import { BridgeRequestPendingError, BridgeRpcError, RevitNotRunningError, SnapshotError } from "./errors.ts";
 import { tools } from "./registry.ts";
 import type { ToolContent, ToolDefinition } from "./registry.ts";
+import { UndoNotConfirmedError } from "./undo.ts";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -30,7 +31,7 @@ export function createServer(client: BridgeClient, toolList: readonly ToolDefini
       { description: tool.description, inputSchema: tool.inputSchema },
       async (args: Record<string, unknown>): Promise<ToolResult> => {
         try {
-          const result = await client.call(tool.name, args, { timeoutMs: tool.timeoutMs });
+          const result = await (tool.run === undefined ? client.call(tool.name, args, { timeoutMs: tool.timeoutMs }) : tool.run(client, tool.timeoutMs));
           return { content: tool.present === undefined ? [{ type: "text", text: JSON.stringify(result) }] : await tool.present(result) };
         } catch (error) {
           return { isError: true, content: [{ type: "text", text: describeError(error) }] };
@@ -48,7 +49,8 @@ export function describeError(error: unknown): string {
     error instanceof BridgeRpcError ||
     error instanceof BridgeRequestPendingError ||
     error instanceof RevitNotRunningError ||
-    error instanceof SnapshotError
+    error instanceof SnapshotError ||
+    error instanceof UndoNotConfirmedError
   ) {
     return error.message;
   }
