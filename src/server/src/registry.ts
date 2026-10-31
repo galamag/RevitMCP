@@ -355,7 +355,7 @@ export const tools: readonly ToolDefinition[] = [
       "use an overhang wider than half the wall, or an outline along the outer faces. A roof Revit cannot build, such as one too high for the model, fails at the end with Can't make footprint roof. in errors. " +
       "actual is { edges, typeId, levelId, boundingBoxMm }. edges has one entry per edge, in the order of outlineMm, read back from the roof: { startMm, endMm, definesSlope, slopeDeg, eaveOffsetMm }. " +
       "startMm and endMm are where that eave really is, so the outline moved out by the overhang. slopeDeg is null on an edge without a slope. eaveOffsetMm is the height of that eave above the level, negative below it. " +
-      "boundingBoxMm is { min, max } in millimetres, and its top includes the thickness of the roof. " +
+      "boundingBoxMm is { min, max } in millimetres, and its top includes the thickness of the roof. It is null for a Sloped Glazing type, where Revit gives no box, so check such a roof on a snapshot. " +
       BATCH_RULES +
       " Related tools: list_types, get_model_info, get_elements, attach_walls, create_walls, save_project.",
     inputSchema: {
