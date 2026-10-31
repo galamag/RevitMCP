@@ -117,7 +117,7 @@ async function context(client: BridgeClient): Promise<Context> {
   const walls = (await client.call("list_types", { category: "walls" })) as TypeRow[];
   const floors = (await client.call("list_types", { category: "floors" })) as TypeRow[];
   const [ground, upper] = levels;
-  const wallType = walls.find((type) => type.family === "Базовая стена") ?? walls[0];
+  const [wallType] = walls;
   const [floorType] = floors;
   assert.ok(ground && upper && wallType && floorType);
 
@@ -252,24 +252,14 @@ describe("stage 2 live checks: levels, walls and floors", { timeout: 120_000 }, 
     });
   });
 
-  it("create_levels shows whether Revit tells names apart by case", async () => {
+  it("a name that differs by case only is another level, as Revit takes it", async () => {
     await withClient(async (client) => {
-      const before = await modelInfo(client);
-
-      const batch = await call(client, "create_levels", [
-        { name: "Новый рядом", elevationMm: 12000 },
-        { name: "ЭТАЖ ПРОБА 1", elevationMm: 13000 },
-      ]);
+      const batch = await call(client, "create_levels", [{ name: "ЭТАЖ ПРОБА 1", elevationMm: 13000 }]);
       console.log(`# name that differs by case only: ${JSON.stringify(batch)}`);
 
-      if (batch.committed) {
-        assert.equal(batch.items[1]?.actual?.["name"], "ЭТАЖ ПРОБА 1");
-      } else {
-        assert.equal(batch.items[0]?.status, "rolled_back");
-        assert.equal(batch.items[1]?.status, "failed");
-        assert.ok(batch.items[1]?.error);
-        assert.equal((await modelInfo(client)).levels.length, before.levels.length);
-      }
+      assertLanded(batch);
+      assert.equal(batch.items[0]?.status, "created");
+      assert.equal(batch.items[0]?.actual?.["name"], "ЭТАЖ ПРОБА 1");
     });
   });
 
@@ -459,6 +449,45 @@ describe("stage 2 live checks: levels, walls and floors", { timeout: 120_000 }, 
     });
   });
 
+  it("a wall too low to build fails on its own item, where Revit gives no failure at commit", async () => {
+    await withClient(async (client) => {
+      const { wallType, ground, upper } = await context(client);
+      const before = countOf(await modelInfo(client), "OST_Walls");
+      const wall = (x: number, extra: object) => ({ startMm: { x, y: 12000 }, endMm: { x: x + 3000, y: 12000 }, typeId: wallType.id, levelId: ground.id, ...extra });
+      const storey = upper.elevationMm - ground.elevationMm;
+
+      for (const low of [{ heightMm: 5 }, { topLevelId: upper.id, baseOffsetMm: storey - 0.1 }]) {
+        const batch = await call(client, "create_walls", [wall(0, { heightMm: 3000 }), wall(5000, low), wall(10000, { heightMm: 3000 })]);
+        console.log(`# too low: ${JSON.stringify(batch)}`);
+
+        assert.equal(batch.committed, false);
+        assert.deepEqual(batch.items.map((item) => item.status), ["rolled_back", "failed", "rolled_back"]);
+        assert.equal(batch.items[1]?.error, "Failed to regenerate.");
+        assert.deepEqual(batch.dialogs, []);
+      }
+
+      assert.equal(countOf(await modelInfo(client), "OST_Walls"), before);
+    });
+  });
+
+  it("what Revit refuses only at commit rolls every item back and gives Revit's own text", async () => {
+    await withClient(async (client) => {
+      const { wallType, ground } = await context(client);
+      const before = countOf(await modelInfo(client), "OST_Walls");
+      const good = { startMm: { x: 0, y: 14000 }, endMm: { x: 3000, y: 14000 }, typeId: wallType.id, levelId: ground.id, heightMm: 3000 };
+
+      // Longer than the shortest line Revit can draw, so it passes the check, and too short for a wall.
+      const batch = await call(client, "create_walls", [good, { ...good, startMm: { x: 5000, y: 14000 }, endMm: { x: 5001, y: 14000 } }]);
+      console.log(`# refused at commit: ${JSON.stringify(batch)}`);
+
+      assert.equal(batch.committed, false);
+      assert.deepEqual(batch.items.map((item) => [item.status, item.error]), [["rolled_back", null], ["rolled_back", null]]);
+      assert.deepEqual(batch.errors.map((error) => error.trim()), ["Can't make Wall."]);
+      assert.deepEqual(batch.dialogs, []);
+      assert.equal(countOf(await modelInfo(client), "OST_Walls"), before);
+    });
+  });
+
   it("a wall on top of another comes back with the warning of Revit, and it lands", async () => {
     await withClient(async (client) => {
       const { wallType, ground } = await context(client);
@@ -504,48 +533,25 @@ describe("stage 2 live checks: levels, walls and floors", { timeout: 120_000 }, 
     });
   });
 
-  it("a self-intersecting outline leaves no floor, and Revit's reason reaches the caller", async () => {
+  it("an outline that crosses itself, touches itself or encloses nothing is refused and leaves no floor", async () => {
     await withClient(async (client) => {
       const { floorType, ground } = await context(client);
       const before = countOf(await modelInfo(client), "OST_Floors");
-      const good = { boundaryMm: [{ x: 20000, y: 30000 }, { x: 24000, y: 30000 }, { x: 24000, y: 34000 }], typeId: floorType.id, levelId: ground.id };
-      const bow = { boundaryMm: [{ x: 30000, y: 30000 }, { x: 34000, y: 34000 }, { x: 34000, y: 30000 }, { x: 30000, y: 34000 }], typeId: floorType.id, levelId: ground.id };
+      const floor = (boundaryMm: Array<{ x: number; y: number }>) => ({ boundaryMm, typeId: floorType.id, levelId: ground.id });
+      const good = floor([{ x: 20000, y: 30000 }, { x: 24000, y: 30000 }, { x: 24000, y: 34000 }]);
 
-      const outcome = await client.call("create_floors", { items: [good, bow] }).then(
-        (result) => result as Batch,
-        (reason: unknown) => reason,
-      );
-      console.log(`# bow tie: ${outcome instanceof Error ? outcome.message : JSON.stringify(outcome)}`);
+      for (const outline of [
+        [{ x: 30000, y: 30000 }, { x: 34000, y: 34000 }, { x: 34000, y: 30000 }, { x: 30000, y: 34000 }],
+        [{ x: 30000, y: 30000 }, { x: 32000, y: 30000 }, { x: 31000, y: 31000 }, { x: 32000, y: 32000 }, { x: 30000, y: 32000 }, { x: 31000, y: 31000 }],
+        [{ x: 30000, y: 30000 }, { x: 32000, y: 30000 }, { x: 34000, y: 30000 }],
+      ]) {
+        const refused = await refusal(client, "create_floors", { items: [good, floor(outline)] });
+        console.log(`# bad outline: ${refused.message}`);
 
-      if (outcome instanceof BridgeRpcError) {
-        assert.equal(outcome.code, INVALID_PARAMS);
-        assert.match(outcome.message, /item 1/);
-      } else {
-        const batch = outcome as Batch;
-        assert.equal(batch.committed, false);
-        assert.equal(batch.items[0]?.status, "rolled_back");
-        assert.ok(batch.errors.length > 0);
+        assert.equal(refused.code, INVALID_PARAMS);
+        assert.match(refused.message, /item 1/);
       }
 
-      assert.equal(countOf(await modelInfo(client), "OST_Floors"), before);
-    });
-  });
-
-  it("a straight outline leaves no floor", async () => {
-    await withClient(async (client) => {
-      const { floorType, ground } = await context(client);
-      const before = countOf(await modelInfo(client), "OST_Floors");
-      const line = { boundaryMm: [{ x: 40000, y: 30000 }, { x: 42000, y: 30000 }, { x: 44000, y: 30000 }], typeId: floorType.id, levelId: ground.id };
-
-      const outcome = await client.call("create_floors", { items: [line] }).then(
-        (result) => result as Batch,
-        (reason: unknown) => reason,
-      );
-      console.log(`# straight outline: ${outcome instanceof Error ? outcome.message : JSON.stringify(outcome)}`);
-
-      if (!(outcome instanceof BridgeRpcError)) {
-        assert.equal((outcome as Batch).committed, false);
-      }
       assert.equal(countOf(await modelInfo(client), "OST_Floors"), before);
     });
   });

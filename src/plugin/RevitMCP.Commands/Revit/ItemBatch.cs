@@ -60,7 +60,7 @@ internal static class ItemBatch
         var results = entries.Select(entry => entry.Settled).ToArray();
         var outcome = results.All(result => result is not null)
             ? new OperationOutcome(true, [], [], [])
-            : Operation.Run(document, method, scope => CreateAll(entries, results, create, method, scope));
+            : Operation.Run(document, method, scope => CreateAll(document, entries, results, create, method, scope));
 
         if (outcome.Committed)
         {
@@ -76,7 +76,13 @@ internal static class ItemBatch
         return batch.ToJson(outcome);
     }
 
+    /// <summary>
+    /// Regenerates after each item. Live Revit: a wall too low to build fails only in regeneration, with the severity
+    /// DocumentCorruption, which rolls the transaction back without reaching <see cref="FailureCollector"/>. At commit
+    /// that leaves no reason and no item to blame, while here it is an exception on the very item.
+    /// </summary>
     private static void CreateAll<T>(
+        Document document,
         IReadOnlyList<BatchEntry<T>> entries,
         ItemResult?[] results,
         Func<T, Element> create,
@@ -93,6 +99,7 @@ internal static class ItemBatch
             try
             {
                 var element = create(entry.Input);
+                document.Regenerate();
                 results[position] = new ItemResult(entry.Index, ItemStatus.Created, element.Id.ToString(), entry.Requested, null, [], null);
             }
             catch (Exception e)

@@ -283,7 +283,8 @@ export const tools: readonly ToolDefinition[] = [
       "from list_types with walls, and levelId and topLevelId from get_model_info. A wall stands on levelId, lifted by " +
       "baseOffsetMm, which may be negative. Give exactly one of heightMm, a fixed height in millimetres that stays the " +
       "same when levels move, and topLevelId, which ties the top of the wall to that level. A top level must be above " +
-      "the foot of the wall. Walls join their neighbours by Revit's own rules, and this tool changes no other element. " +
+      "the foot of the wall. Revit cannot build a very low wall: 30 mm failed and 50 mm worked, and such an item fails " +
+      "with only the words Failed to regenerate. Walls join their neighbours by Revit's own rules, and this tool changes no other element. " +
       "actual is { startMm, endMm, lengthMm, heightMm, widthMm, baseOffsetMm, typeId, levelId, topLevelId }: lengthMm is " +
       "along the centre line, heightMm is measured from the foot of the wall, and topLevelId is null for a fixed height. " +
       BATCH_RULES +
@@ -312,7 +313,7 @@ export const tools: readonly ToolDefinition[] = [
       "Creates floors in the active project from outlines of straight edges. boundaryMm lists the corners in " +
       "millimetres in model coordinates, in either direction. The outline closes by itself from the last point to the " +
       `first, so do not repeat the first point: equal neighbouring points are refused. It needs at least ${MIN_OUTLINE_POINTS} points. ` +
-      "An outline with crossing edges is refused or fails, and it never lands. Take typeId from list_types with floors " +
+      "An outline that crosses or touches itself, or encloses no area, is refused. Take typeId from list_types with floors " +
       "and levelId from get_model_info. The top of the floor lies on the level, so its thickness goes downwards. " +
       "actual is { areaM2, heightOffsetMm, typeId, levelId, boundingBoxMm }: areaM2 is in square metres, and " +
       "boundingBoxMm is { min, max } in millimetres. " +

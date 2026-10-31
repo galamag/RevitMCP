@@ -70,7 +70,7 @@ public sealed class CreateFloorsCommand : ICommand
 
         return BoundaryValidation.IsValidHorizontalBoundary([outline])
             ? outline
-            : throw reader.Refuse("boundaryMm is not a valid outline, as Revit reads it: its edges must not cross.");
+            : throw reader.Refuse("Revit does not take boundaryMm as an outline: it must enclose an area, and its edges must not cross or touch.");
     }
 
     private static object Describe(Floor floor)
