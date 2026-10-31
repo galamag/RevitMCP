@@ -186,7 +186,7 @@ export const tools: readonly ToolDefinition[] = [
     name: "get_elements",
     description:
       "Reads elements of the active project by id, without changing anything. Returns { elements, notFound }. " +
-      "elements is [{ id, category, typeName, levelId, boundingBoxMm }] in the order asked, each id once. notFound " +
+      "elements is [{ id, category, typeName, levelId, boundingBoxMm, topMm? }] in the order asked, each id once. notFound " +
       "lists the ids that match no element, so an id that is gone does not fail the others. Text that cannot be an " +
       "element id refuses the whole call, and so do more than 1000 ids. category is a list_types word such as walls where one exists, otherwise " +
       "a stable English BuiltInCategory name such as OST_Levels, and null for an element without a category or in a " +
@@ -194,7 +194,8 @@ export const tools: readonly ToolDefinition[] = [
       "usually Russian, and null when it has none. levelId is a string, and null when the element is not tied to a " +
       "level. boundingBoxMm is { min: { x, y, z }, max: { x, y, z } } in millimetres in model coordinates, aligned " +
       "to the model axes and independent of any view. It can be larger than what is visible, and it is null when " +
-      "Revit knows no box, as for a type. Related tools: list_types, get_model_info.",
+      "Revit knows no box, as for a type. A wall also has topMm, in millimetres in model coordinates: its real top, read from its shape. " +
+      "A wall's box can keep an old height after the wall is cut by a roof, so read topMm for a wall and not boundingBoxMm. Other categories have no topMm. Related tools: list_types, get_model_info.",
     inputSchema: {
       ids: z.array(z.string().min(1)).min(1).max(MAX_ELEMENT_IDS).describe("Element ids as strings, passed on unchanged from other tools."),
     },
@@ -354,7 +355,7 @@ export const tools: readonly ToolDefinition[] = [
       "This tool changes no wall, so the triangle under a gable stays open until attach_walls raises the walls to the roof. Only what lies under the roof can rise, so an outline along the centre lines of walls leaves their outer half low: " +
       "use an overhang wider than half the wall, or an outline along the outer faces. A roof Revit cannot build, such as one too high for the model, fails at the end with Can't make footprint roof. in errors. " +
       "actual is { edges, typeId, levelId, boundingBoxMm }. edges has one entry per edge, in the order of outlineMm, read back from the roof: { startMm, endMm, definesSlope, slopeDeg, eaveOffsetMm }. " +
-      "startMm and endMm are where that eave really is, so the outline moved out by the overhang. slopeDeg is null on an edge without a slope. eaveOffsetMm is the height of that eave above the level, negative below it. " +
+      "startMm and endMm are where that eave really is, so the outline moved out by the overhang. slopeDeg is null on an edge without a slope. eaveOffsetMm is the height of that edge above the level, negative below it, and it means nothing on an edge without a slope: it reads 0 there, while that rake really ends below the level when there is an overhang. " +
       "boundingBoxMm is { min, max } in millimetres, and its top includes the thickness of the roof. It is null for a Sloped Glazing type, where Revit gives no box, so check such a roof on a snapshot. " +
       BATCH_RULES +
       " Related tools: list_types, get_model_info, get_elements, attach_walls, create_walls, save_project.",
@@ -363,7 +364,7 @@ export const tools: readonly ToolDefinition[] = [
         z
           .strictObject({
             outlineMm: z.array(planPoint("A corner of the outline")).min(MIN_OUTLINE_POINTS).describe(`The corners of the outline, at least ${MIN_OUTLINE_POINTS}. It closes by itself. Edge N starts at point N.`),
-            levelId: elementId("The id of the level the eaves sit on"),
+            levelId: elementId("The id of the level at the top of the walls"),
             typeId: elementId("The id of a roof type from list_types"),
             overhangMm: z.number().min(0).default(0).describe("How far every edge moves out from the outline, in millimetres."),
             edgeSlopesDeg: z
@@ -390,7 +391,7 @@ export const tools: readonly ToolDefinition[] = [
       "A wall that stands above the whole roof cannot follow it, as its top would fall below its foot: the batch then fails at the end with Revit's reason in errors. " +
       "Only the part of a wall under the roof can rise, so an outline along the centre lines of the walls leaves their outer half low, see create_roof. " +
       "actual is { attachedToIds, topMm }: attachedToIds lists every element the top of the wall is attached to, and topMm is the highest point of the real shape of the wall, in millimetres in model coordinates. " +
-      "Read topMm and not get_elements, whose box still shows the old height of a wall that was cut down to a roof. " +
+      "For this tool the batch rules read so: a rolled_back item has elementId null although the wall exists, because it is the attachment that is not in the model, and a call whose items are all already_existed changes nothing, so it leaves no unsaved changes. " +
       BATCH_RULES +
       " Related tools: create_roof, create_walls, get_elements, save_project.",
     inputSchema: {

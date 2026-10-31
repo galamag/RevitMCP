@@ -57,15 +57,22 @@ public sealed class GetElementsCommand : ICommand
     private static object Describe(Document document, Element element)
     {
         var levelId = element.LevelId;
-
-        return new
+        var description = new Dictionary<string, object?>
         {
-            id = element.Id.ToString(),
-            category = CategoryMap.KeyOf(element.Category),
-            typeName = document.GetElement(element.GetTypeId())?.Name,
-            levelId = levelId == ElementId.InvalidElementId ? null : levelId.ToString(),
-            boundingBoxMm = BoxMm(element.get_BoundingBox(null)),
+            ["id"] = element.Id.ToString(),
+            ["category"] = CategoryMap.KeyOf(element.Category),
+            ["typeName"] = document.GetElement(element.GetTypeId())?.Name,
+            ["levelId"] = levelId == ElementId.InvalidElementId ? null : levelId.ToString(),
+            ["boundingBoxMm"] = BoxMm(element.get_BoundingBox(null)),
         };
+
+        // Only a wall has a top that differs from its box: the box keeps the old height of a wall cut down to a roof.
+        if (element is Wall wall)
+        {
+            description["topMm"] = WallGeometry.TopMm(wall);
+        }
+
+        return description;
     }
 
     private static object? BoxMm(BoundingBoxXYZ? box) =>

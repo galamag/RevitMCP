@@ -51,6 +51,7 @@ interface ElementRow {
   id: string;
   category: string | null;
   boundingBoxMm: Box | null;
+  topMm?: number | null;
 }
 
 interface RoofEdge {
@@ -368,6 +369,9 @@ describe("stage 2 live checks: roofs and attached walls", { timeout: 120_000 }, 
       console.log(`# real tops: ${JSON.stringify(tops)}`);
       assertNear(tops[1], ridge, "the real top of the east wall", ROOF_NEAR_MM);
       assertNear(tops[3], ridge, "the real top of the west wall", ROOF_NEAR_MM);
+
+      // get_elements gives a wall the same real top as attach_walls.
+      after.forEach((wall, index) => assertNear(wall.topMm, tops[index] as number, `topMm of get_elements equals topMm of attach_walls, wall ${index}`, 0.01));
       assert.ok((tops[0] as number) < upper.elevationMm + 200, "the real top of the south wall");
 
       const again = await call(client, "attach_walls", [{ wallId: wallIds[0], roofId }]);
@@ -803,8 +807,10 @@ describe("stage 2 live checks: roofs and attached walls", { timeout: 120_000 }, 
       assertLanded(batch);
       assertNear(batch.items[0]?.actual?.["topMm"], upper.elevationMm + y * tan(SLOPE_DEG), "the wall stops at the ridge", ROOF_NEAR_MM);
 
-      // Not asserted: this is a habit of Revit, which the description of attach_walls warns about.
-      console.log(`# the same wall in get_elements: ${JSON.stringify(await readElements(client, [walls.items[0]?.elementId ?? null]))}`);
+      // The box of the wall keeps its old height, which is why get_elements has topMm: it gives the real top.
+      const [cut] = await readElements(client, [walls.items[0]?.elementId ?? null]);
+      console.log(`# the same wall in get_elements: ${JSON.stringify(cut)}`);
+      assertNear(cut?.topMm, upper.elevationMm + y * tan(SLOPE_DEG), "topMm of get_elements is the real top", ROOF_NEAR_MM);
     });
   });
 

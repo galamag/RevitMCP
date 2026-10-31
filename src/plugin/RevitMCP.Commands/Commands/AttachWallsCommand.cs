@@ -66,26 +66,11 @@ public sealed class AttachWallsCommand : ICommand
         }
     }
 
-    /// <summary>
-    /// The top is read from the solids of the wall. Live Revit: a box follows a wall up to a roof, but both
-    /// <see cref="Element.get_BoundingBox"/> and <see cref="GeometryElement.GetBoundingBox"/> keep the old height of a
-    /// wall cut down to one, while a snapshot shows nothing above the roof.
-    /// </summary>
-    private static object Describe(Wall wall)
+    private static object Describe(Wall wall) => new
     {
-        var top = wall.get_Geometry(new Options())?
-            .OfType<Solid>()
-            .SelectMany(solid => solid.Edges.Cast<Edge>())
-            .SelectMany(edge => edge.Tessellate())
-            .Select(point => (double?)point.Z)
-            .Max();
-
-        return new
-        {
-            attachedToIds = wall.GetAttachmentIds(AttachmentLocation.Top).Select(id => id.ToString()).ToList(),
-            topMm = top is { } height ? Units.InternalToMm(height) : (double?)null,
-        };
-    }
+        attachedToIds = wall.GetAttachmentIds(AttachmentLocation.Top).Select(id => id.ToString()).ToList(),
+        topMm = WallGeometry.TopMm(wall),
+    };
 
     private sealed record AttachInput(Wall Wall, ElementId RoofId);
 }
