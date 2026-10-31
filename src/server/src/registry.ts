@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import { presentSnapshot } from "./snapshot.ts";
+
+/** One part of a tool result, as MCP defines it. */
+export type ToolContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+
 /** One MCP tool. Each tool forwards to the bridge method of the same name in `src/contract/protocol.json`. */
 export interface ToolDefinition {
   readonly name: string;
@@ -9,10 +14,16 @@ export interface ToolDefinition {
   readonly inputSchema: Record<string, z.ZodType>;
   /** How long to wait for Revit before the request is cancelled. The client default (60 s) applies when unset. */
   readonly timeoutMs?: number;
+  /** Turns the plugin's answer into the tool result. When unset, the answer is returned as JSON text. */
+  readonly present?: (answer: unknown) => Promise<ToolContent[]>;
 }
 
 /** The plugin answers these on its socket thread, so they come back at once even while Revit is busy. */
 const IMMEDIATE_TIMEOUT_MS = 10_000;
+
+/** The limits of `widthPx`, which the plugin checks too. */
+const MIN_SNAPSHOT_WIDTH_PX = 100;
+const MAX_SNAPSHOT_WIDTH_PX = 4096;
 
 const requestId = z
   .string()
@@ -25,6 +36,11 @@ const projectName = z
   .describe(
     "A bare file name in the test folder, not a path: no folders, no drive, and no dots apart from an optional .rvt ending. The full path may be at most 254 characters, and a refusal states the longest name that fits. Russian names are fine and stay exactly as written.",
   );
+
+const modelPoint = (what: string) =>
+  z
+    .object({ x: z.number(), y: z.number(), z: z.number() })
+    .describe(`${what}, as { x, y, z } in millimetres in model coordinates, the same as boundingBoxMm of get_elements. z is the height above the project origin, not above a level.`);
 
 export const tools: readonly ToolDefinition[] = [
   {
@@ -113,5 +129,79 @@ export const tools: readonly ToolDefinition[] = [
       "lists the Revit dialogs that came up and were refused, usually none. Related tools: create_project, " +
       "open_project, get_model_info.",
     inputSchema: { name: projectName.optional() },
+  },
+  {
+    name: "list_types",
+    description:
+      "Lists the types the active project holds in one category, without changing anything. Use it before creating " +
+      "an element, because elements are created from a type id and the names are not known in advance. Returns " +
+      "[{ id, family, name }] sorted by family, then name, then id, so the order holds between calls. ids are " +
+      "strings: pass them back unchanged. family and name are Revit's own text, usually Russian: read them to choose " +
+      "a type, and never guess or translate one. An empty list means that no type of this category is loaded in the " +
+      "project, not that the category is unknown. Related tools: get_elements, get_model_info.",
+    inputSchema: {
+      category: z
+        .enum(["walls", "floors", "roofs", "ceilings", "doors", "windows", "furniture", "plumbing", "stairs", "railings"])
+        .describe("The category to list. These words stay the same whatever the language of Revit."),
+    },
+  },
+  {
+    name: "get_elements",
+    description:
+      "Reads elements of the active project by id, without changing anything. Returns { elements, notFound }. " +
+      "elements is [{ id, category, typeName, levelId, boundingBoxMm }] in the order asked, each id once. notFound " +
+      "lists the ids that match no element, so an id that is gone does not fail the others. Text that cannot be an " +
+      "element id refuses the whole call. category is a list_types word such as walls where one exists, otherwise " +
+      "a stable English BuiltInCategory name such as OST_Levels, and null for an element without a category or in a " +
+      "custom one: it does not change with the language of Revit. typeName is the name of the element's type, " +
+      "usually Russian, and null when it has none. levelId is a string, and null when the element is not tied to a " +
+      "level. boundingBoxMm is { min: { x, y, z }, max: { x, y, z } } in millimetres in model coordinates, aligned " +
+      "to the model axes and independent of any view. It can be larger than what is visible, and it is null when " +
+      "Revit knows no box, as for a type. Related tools: list_types, get_model_info.",
+    inputSchema: {
+      ids: z.array(z.string().min(1)).min(1).describe("Element ids as strings, passed on unchanged from other tools."),
+    },
+  },
+  {
+    name: "create_3d_view",
+    description:
+      "Creates a new 3D view in the active project as one Undo step, and leaves the active view as it is. kind is " +
+      "isometric, which keeps Revit's default direction, or perspective, which needs eyeMm and targetMm. Passing " +
+      "eyeMm or targetMm with isometric is refused, because an isometric view here cannot use them. displayStyle " +
+      "is shading, realistic (materials) or rendering. name is the exact name of the view: a name that a 3D view " +
+      "already has is refused, never changed, so use get_model_info to see the views. Returns { committed, viewId, " +
+      "name, kind, displayStyle, warnings, errors, dialogs }. Read committed: when it is false nothing was created, " +
+      "viewId is null and errors says why. displayStyle is what the view really has. warnings lists what Revit " +
+      "reported, and dialogs ([{ dialogId, message }]) the dialogs that came up and were refused, usually none. " +
+      "The project then has unsaved changes. Related tools: get_view_snapshot, save_project.",
+    inputSchema: {
+      name: z.string().min(1).describe("The name of the new view. Russian is fine. Revit forbids some characters in names, such as { } [ ] | ; < > ? ` ~ \\ :"),
+      kind: z.enum(["isometric", "perspective"]).describe("isometric has no vanishing points; perspective looks like a photo."),
+      displayStyle: z.enum(["shading", "realistic", "rendering"]).describe("How the view draws the model."),
+      eyeMm: modelPoint("Where the camera stands").optional(),
+      targetMm: modelPoint("The point the camera looks at").optional(),
+    },
+  },
+  {
+    name: "get_view_snapshot",
+    description:
+      "Exports one view of the active project as a PNG and returns it as an image, then a text part with { viewId, " +
+      "viewName, path, dialogs, sizeBytes }. It does not change the model. Take viewId from get_model_info or " +
+      "create_3d_view; the view need not be open. Plans, sections, elevations, 3D views, sheets, drafting views and " +
+      "legends can be exported. Schedules and other tables cannot, and are refused, like an id that is no view. " +
+      "A refused id lists the views that can be used. Files stay in %LOCALAPPDATA%\\RevitMCP\\snapshots and each " +
+      "call adds one. A file over about 3.7 MB is not sent, because a client cannot take it: ask again with a " +
+      "smaller widthPx. Related tools: create_3d_view, get_model_info.",
+    inputSchema: {
+      viewId: z.string().min(1).describe("The id of the view, as a string."),
+      widthPx: z
+        .number()
+        .int()
+        .min(MIN_SNAPSHOT_WIDTH_PX)
+        .max(MAX_SNAPSHOT_WIDTH_PX)
+        .default(1600)
+        .describe("The width of the image in pixels. The height follows from the shape of the view."),
+    },
+    present: presentSnapshot(),
   },
 ];

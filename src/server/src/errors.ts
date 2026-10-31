@@ -48,6 +48,14 @@ export class BridgeRpcError extends Error {
   }
 }
 
+/** The plugin answered, but its snapshot cannot be handed to the model. The message says why. */
+export class SnapshotError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "SnapshotError";
+  }
+}
+
 function describePending(requestId: string, state: RequestState): string {
   const how = state === "running"
     ? "It is running in Revit now and cannot be cancelled."

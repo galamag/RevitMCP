@@ -5,12 +5,13 @@ using RevitMCP.Bridge;
 namespace RevitMCP.Commands;
 
 /// <summary>
-/// What the project commands share. They change no model, so they do not use <see cref="Operation"/>, and the dialogs
-/// it would report are theirs to read before the dialog guard drops them.
+/// What the commands that call Revit outside a transaction share. They change no model, so they do not use
+/// <see cref="Operation"/>, and the dialogs it would report are theirs to read before the dialog guard drops them.
 /// </summary>
 internal static class ProjectSupport
 {
-    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+    /// <summary>Gives a <see cref="DialogRecord"/> the camelCase keys of the contract.</summary>
+    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
 
     /// <summary>Reads the required <c>name</c> parameter, without judging it: <see cref="TestFolder.Resolve"/> does.</summary>
     public static string ReadName(JsonElement parameters, string method) =>

@@ -34,6 +34,10 @@ public sealed class CommandRegistry
         new CreateProjectCommand(),
         new OpenProjectCommand(),
         new SaveProjectCommand(),
+        new ListTypesCommand(),
+        new GetElementsCommand(),
+        new Create3dViewCommand(),
+        new GetViewSnapshotCommand(),
     ]);
 
     /// <summary>Returns the command for this method, or <c>null</c>.</summary>

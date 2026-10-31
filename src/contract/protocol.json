@@ -7,6 +7,10 @@
     "get_model_info",
     "create_project",
     "open_project",
-    "save_project"
+    "save_project",
+    "list_types",
+    "get_elements",
+    "create_3d_view",
+    "get_view_snapshot"
   ]
 }
