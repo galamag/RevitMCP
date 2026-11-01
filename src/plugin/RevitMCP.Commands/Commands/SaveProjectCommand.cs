@@ -5,7 +5,7 @@ using RevitMCP.Commands.Dispatch;
 namespace RevitMCP.Commands;
 
 /// <summary>
-/// Saves the active document, and only when its file is in the test folder. An optional <c>name</c> states which
+/// Saves the active document, and only when its file is a <c>.rvt</c> in the test folder. An optional <c>name</c> states which
 /// project the caller means, so a document that became active in the meantime is refused instead of saved.
 /// Revit keeps numbered backups such as <c>name.0001.rvt</c> beside the file.
 /// </summary>
@@ -42,6 +42,9 @@ public sealed class SaveProjectCommand : ICommand
                 JsonRpcCodes.InternalError,
                 $"The active document is outside {TestFolder.Root}, so save_project leaves it alone: {path}");
         }
+
+        // A document that a save_project_template could not return to its project sits on a .rte, which Contains accepts.
+        ProjectSupport.RequireProjectFile(path, Method, "would write into it instead of into a project");
 
         if (expected is not null && !string.Equals(path, expected, StringComparison.OrdinalIgnoreCase))
         {

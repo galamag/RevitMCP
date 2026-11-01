@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -11,11 +11,14 @@ import { undoWithOneRetry } from "../undoRetry.ts";
 
 // These tests need a running Revit with the RevitMCP plugin loaded. Each run creates one source project, saves two
 // templates (.rte) from it and makes three new projects, two from those templates and one from the stock template. All of
-// them stay open and saved, and nothing in the test folder is ever deleted, so every name carries a stamp.
+// them stay open and saved, and nothing in the test folder is ever deleted, so every name carries a stamp. The one
+// exception is the text file that stands in for a template Revit cannot read: it has a fixed name, is written once and reused.
 //
 // Not driven here: the failure of the save back to the .rvt, which leaves the document on the .rte, and a template that is open
-// as a document. No tool closes a document, so provoking either would leave Revit in a state only a person can end. The one
-// failure that is easy to predict, a read-only .rvt, is refused before anything is written, and that refusal is driven.
+// as a document, and so save_project refusing a document that is on a .rte. No tool closes a document, so provoking any of
+// them would leave Revit in a state only a person can end. The words of those failures are unit tested in
+// TemplateSaveFailureTests, and the rule that save_project needs a .rvt in TestFolderTests. The one failure that is easy to
+// predict, a read-only .rvt, is refused before anything is written, and that refusal is driven.
 
 interface OpenDocument {
   title: string;
@@ -93,7 +96,9 @@ const secondTemplateName = `проверка-шаблон-две-стены-${st
 const fromFirstName = `проверка-шаблоны-из-стены-${stamp}`;
 const fromSecondName = `проверка-шаблоны-из-двух-${stamp}`;
 const plainName = `проверка-шаблоны-стандарт-${stamp}`;
-const brokenTemplateName = `проверка-шаблон-битый-${stamp}`;
+/** One fixed name for the text file that stands in for a template Revit cannot read, so that runs share it and none adds another. */
+const brokenTemplateName = "проверка-шаблон-битый";
+const brokenTemplateText = "This is not a Revit template.\n";
 const brokenProjectName = `проверка-шаблоны-битый-проект-${stamp}`;
 const afterRestartName = `проверка-шаблоны-после-перезапуска-${stamp}`;
 const earlierTemplate = process.env["REVITMCP_TEMPLATE_NAME"];
@@ -494,7 +499,15 @@ describe("stage 3 live checks: project templates", { timeout: 900_000 }, () => {
 
   it("a template that Revit cannot read gives an error, opens nothing and makes no project", async () => {
     await withClient(async (client) => {
-      writeFileSync(templateFile(brokenTemplateName), "This is not a Revit template.\n", { flag: "wx" });
+      // Written once: a file that is already there from an earlier run is kept and reused, and nothing overwrites it.
+      try {
+        writeFileSync(templateFile(brokenTemplateName), brokenTemplateText, { flag: "wx" });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw error;
+        }
+      }
+      assert.equal(readFileSync(templateFile(brokenTemplateName), "utf8"), brokenTemplateText, "the stand-in must still be the text file");
       const before = await modelInfo(client);
       const folderBefore = listing(folder);
 

@@ -193,8 +193,8 @@ export const tools: readonly ToolDefinition[] = [
     name: "save_project",
     description:
       "Saves the active project to its file, which must be in the test folder (%USERPROFILE%\\Documents\\RevitMCP). It " +
-      "refuses when no project is active, when the active document was never saved (use create_project) and when its " +
-      "file is elsewhere. Pass name to state which project you mean: if another one is active, nothing is saved and " +
+      "refuses when no project is active, when the active document was never saved (use create_project), when its " +
+      "file is elsewhere and when its file is not a .rvt project, such as a template (use open_project). Pass name to state which project you mean: if another one is active, nothing is saved and " +
       "you should call open_project first. Without name it saves whatever is active. Revit keeps numbered backups " +
       "such as <name>.0001.rvt beside the file. Returns { name, path, dialogs }: dialogs ([{ dialogId, message }]) " +
       "lists the Revit dialogs that came up and were refused, usually none. Related tools: create_project, " +
@@ -210,12 +210,12 @@ export const tools: readonly ToolDefinition[] = [
       "So save one from a project that holds only what new projects should start with. " +
       "The project stays the active document, on its own .rvt, and you carry on working in it. " +
       "The tool saves it too: it writes the project as it is now, unsaved changes included, to the template and then back over the .rvt, so afterwards the project is saved, isModified is false, and no save_project is needed. " +
-      "It changes no model and adds no Undo step, and Revit keeps a numbered backup such as <name>.0001.rvt beside the project when it writes it. " +
+      "It changes no model and adds no Undo step, and Revit moves the earlier project file to a numbered backup such as <name>.0001.rvt beside it when it writes the project. " +
       "It refuses when no project is active, when the active document was never saved or its file is not a .rvt in the test folder (use create_project or open_project first), " +
       "when that .rvt is read-only, and when a template of that name already exists: it overwrites nothing, so pick another name. " +
       "Pass a name and never a path, with no dots apart from an optional .rte ending. " +
       "Returns { name, path, templatePath, isModified, dialogs }: path is the project's file, templatePath is the new template, and dialogs ([{ dialogId, message }]) lists the Revit dialogs that came up and were refused, usually none. " +
-      "If saving back to the project fails, the error says in capital letters that the active document stayed on the template. Then do not call save_project, because it would write into the template, and tell the user. " +
+      "If saving back to the project fails, the error says in capital letters where the active document is now, usually that it stayed on the template, and what is known of the project file. Then stop working in that document, do not call save_project (it refuses a document that is not a .rvt project) and tell the user. " +
       "Takes several seconds. Related tools: create_project, save_project, open_project, get_model_info.",
     inputSchema: { name: templateName },
   },

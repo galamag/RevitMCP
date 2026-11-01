@@ -259,6 +259,13 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /unsaved/);
   });
 
+  it("tells the model that save_project refuses a file that is not a .rvt project", () => {
+    const description = tools.find((tool) => tool.name === "save_project")?.description ?? "";
+
+    assert.match(description, /not a \.rvt project/);
+    assert.match(description, /template/);
+  });
+
   it("passes a list_types category and returns Cyrillic names intact", async (t) => {
     const types = [{ id: "123", family: "Базовая стена", name: "Кирпич 250 мм" }];
     const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, types));

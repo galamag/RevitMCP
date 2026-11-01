@@ -12,12 +12,12 @@ namespace RevitMCP.Commands;
 /// and moves the active document onto the <c>.rte</c>, where <c>NewProjectDocument</c> cannot use it. So <c>SaveAs</c> goes
 /// straight back over the <c>.rvt</c> with <c>OverwriteExistingFile</c>, which makes the <c>.rvt</c> hold that same state
 /// and frees the <c>.rte</c>. The document keeps its identity through both, so the undo history stays in step with it.
-/// A template is never overwritten, and nothing here deletes a file.
+/// A template is never overwritten, and nothing here deletes a file. The save over the <c>.rvt</c> renames the earlier file to the
+/// next numbered backup, <c>name.0001.rvt</c>, first, as the file times in the test folder showed. A failure reads where the
+/// document is from Revit and says so, see <see cref="TemplateSaveFailure"/>.
 /// </summary>
 public sealed class SaveProjectTemplateCommand : ICommand
 {
-    private const string ProjectExtension = ".rvt";
-
     public string Method => MethodNames.SaveProjectTemplate;
 
     public bool NeedsDocument => true;
@@ -60,13 +60,7 @@ public sealed class SaveProjectTemplateCommand : ICommand
                 $"The active document is outside {TestFolder.Root}, so save_project_template leaves it alone: {project}");
         }
 
-        if (!string.Equals(Path.GetExtension(project), ProjectExtension, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new RequestFailedException(
-                JsonRpcCodes.InternalError,
-                $"The active document is {project}, which is not a {ProjectExtension} project, so there is no project file to return to and nothing was saved. "
-                + "Use open_project to make the project active first.");
-        }
+        ProjectSupport.RequireProjectFile(project, MethodNames.SaveProjectTemplate, "has no project file to return to");
 
         // Revit refuses to overwrite a read-only file, and the save back would then fail with the document on the template.
         if (File.Exists(project) && File.GetAttributes(project).HasFlag(FileAttributes.ReadOnly))
@@ -93,15 +87,17 @@ public sealed class SaveProjectTemplateCommand : ICommand
     {
         try
         {
-            // Without OverwriteExistingFile, Revit itself refuses a template that appeared since the check.
-            document.SaveAs(template);
+            // OverwriteExistingFile is false by default and is said here on purpose. RevitAPI.xml says false makes SaveAs fail
+            // when a file is already at the target, and that, not the check in Refuse, is what keeps a template that appeared
+            // in between safe. That case was not provoked live.
+            document.SaveAs(template, new SaveAsOptions { OverwriteExistingFile = false });
         }
         catch (Exception e)
         {
             Log.Error($"{MethodNames.SaveProjectTemplate} failed writing the template.", e);
             throw new RequestFailedException(
                 JsonRpcCodes.InternalError,
-                $"{MethodNames.SaveProjectTemplate} failed writing the template: {e.Message} {WhereItStands(document, project, template)}");
+                TemplateSaveFailure.WritingTemplate($"Revit said: {e.Message}", project, template, PathOf(document), File.Exists(template)));
         }
 
         try
@@ -111,42 +107,21 @@ public sealed class SaveProjectTemplateCommand : ICommand
         catch (Exception e)
         {
             Log.Error($"{MethodNames.SaveProjectTemplate} could not save back to the project file.", e);
-            throw StayedOnTemplate(project, template, $"Revit said: {e.Message}", document);
+            throw new RequestFailedException(
+                JsonRpcCodes.InternalError,
+                TemplateSaveFailure.SavingBack($"Revit said: {e.Message}", project, template, PathOf(document)));
         }
 
         // The save came back without an error, yet the document must really be on the project file again.
-        if (!string.Equals(PathOf(document), project, StringComparison.OrdinalIgnoreCase))
+        var path = PathOf(document);
+        if (!string.Equals(path, project, StringComparison.OrdinalIgnoreCase))
         {
-            throw StayedOnTemplate(project, template, "Revit reported no error, but the document is not on the project file.", document);
+            throw new RequestFailedException(
+                JsonRpcCodes.InternalError,
+                TemplateSaveFailure.SavingBack("Revit reported no error, but the document is not on the project file.", project, template, path));
         }
 
         return document;
-    }
-
-    /// <summary>
-    /// The one failure that leaves the session in a state a person must end: the document stays on the <c>.rte</c>. The
-    /// result says so first and in capitals, because it is easy to read past, and says what the caller must not do.
-    /// </summary>
-    private static RequestFailedException StayedOnTemplate(string project, string template, string cause, Document document) =>
-        new(
-            JsonRpcCodes.InternalError,
-            $"{MethodNames.SaveProjectTemplate} FAILED TO SAVE BACK TO THE PROJECT: THE ACTIVE DOCUMENT STAYED ON THE TEMPLATE {PathOf(document)}, not on {project}. "
-            + $"{cause} The template {template} was written and holds the project as it was; the project file on disk may be older than that. "
-            + "Do not call save_project or save_project_template now: save_project would write into the template. "
-            + $"Nothing was deleted. Ask the user to look at Revit: that document has to be saved over {project} or closed, "
-            + "and restart-revit.ps1 will not close Revit while a template is open as a document.");
-
-    private static string WhereItStands(Document document, string project, string template)
-    {
-        var path = PathOf(document);
-        var onProject = string.Equals(path, project, StringComparison.OrdinalIgnoreCase);
-        var file = File.Exists(template)
-            ? $"A partial file may remain at {template}. It was left there, so that name stays taken."
-            : $"No file was left at {template}.";
-
-        return onProject
-            ? $"The active document is still {project}, and it was not changed. {file}"
-            : $"The active document is now {path}, not {project}. {file}";
     }
 
     /// <summary>The path of the document, or a note that it could not be read: this runs while a failure is on its way.</summary>
@@ -159,7 +134,7 @@ public sealed class SaveProjectTemplateCommand : ICommand
         catch (Exception e)
         {
             Log.Error("Could not read the path of the document after a failed save_project_template.", e);
-            return "(unreadable)";
+            return TemplateSaveFailure.UnreadablePath;
         }
     }
 }

@@ -233,6 +233,33 @@ public class TestFolderTests
         Assert.Equal(Path.Combine(profile, "Documents", "RevitMCP"), TestFolder.Root, ignoreCase: true);
     }
 
+    [Theory]
+    [InlineData(@"C:\x\дом.rvt", true)]
+    [InlineData(@"C:\x\дом.RVT", true)]
+    [InlineData(@"C:\x\дом.Rvt", true)]
+    [InlineData(@"C:\x\дом.0001.rvt", true)]
+    [InlineData(@"C:\x\шаблон.rte", false)]
+    [InlineData(@"C:\x\шаблон.RTE", false)]
+    [InlineData(@"C:\x\дом.rfa", false)]
+    [InlineData(@"C:\x\дом.rvt.rte", false)]
+    [InlineData(@"C:\x\дом.rte.rvt", true)]
+    [InlineData(@"C:\x\дом", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void HasProjectExtension_IsTrueOnlyForRvt(string? path, bool expected) =>
+        Assert.Equal(expected, TestFolder.HasProjectExtension(path!));
+
+    [Fact]
+    public void HasProjectExtension_SaysNothingOfTheFolder_ContainsDoes()
+    {
+        var template = TestFolder.ResolveTemplate("дом");
+
+        Assert.True(TestFolder.Contains(template));
+        Assert.False(TestFolder.HasProjectExtension(template));
+        Assert.True(TestFolder.HasProjectExtension(@"D:\elsewhere\дом.rvt"));
+        Assert.False(TestFolder.Contains(@"D:\elsewhere\дом.rvt"));
+    }
+
     private static void AssertTemplateRefused(string name)
     {
         var refusal = Assert.Throws<RequestFailedException>(() => TestFolder.ResolveTemplate(name));

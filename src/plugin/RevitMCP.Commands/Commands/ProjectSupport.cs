@@ -25,6 +25,23 @@ internal static class ProjectSupport
             : throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"{method} needs a text {key}.");
 
     /// <summary>
+    /// Refuses an active document whose file is not a <c>.rvt</c>. <see cref="TestFolder.Contains"/> accepts a project template
+    /// in the test folder too, and that is where a <c>save_project_template</c> that could not save back leaves the document, so
+    /// a tool that writes into the active document must not take it for a project. Nothing has been written when this throws.
+    /// </summary>
+    /// <param name="consequence">What <paramref name="tool"/> would do with that file, in the words of the refusal.</param>
+    public static void RequireProjectFile(string path, string tool, string consequence)
+    {
+        if (!TestFolder.HasProjectExtension(path))
+        {
+            throw new RequestFailedException(
+                JsonRpcCodes.InternalError,
+                $"The active document is {path}, which is not a .rvt project, so {tool} {consequence} and nothing was saved. "
+                + "Use open_project to make the project active first.");
+        }
+    }
+
+    /// <summary>
     /// Runs the Revit calls of a command and builds its result. <paramref name="describe"/> gets the dialogs, for the
     /// key <c>dialogs</c> in the shape of <see cref="OperationOutcome.Dialogs"/>. A dialog the guard refused is often
     /// why Revit failed, so a failure carries them in its message instead of losing them with the exception.

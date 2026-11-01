@@ -61,6 +61,14 @@ public static class TestFolder
     /// </summary>
     public static bool Contains(string path) => WindowsNames.TryGetNamesBelow(Root, path, out _);
 
+    /// <summary>
+    /// Tells whether <paramref name="path"/> ends in <c>.rvt</c>, in any case, which a project does and a template does not.
+    /// It says nothing of where the file is: <see cref="Contains"/> accepts a <c>.rte</c> in the folder too, and a tool that
+    /// writes into the active document must not mistake one for a project.
+    /// </summary>
+    public static bool HasProjectExtension(string path) =>
+        string.Equals(Path.GetExtension(path), ProjectExtension, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Says what is wrong with one path segment, or returns <c>null</c> when Windows would keep it as it is.</summary>
     private static string? FindProblem(string? segment) => WindowsNames.Check(segment) switch
     {
