@@ -69,6 +69,7 @@ Full history: the `Журнал решений` note in the vault. Open question
 - Bare openings read Width and Height 0, and a written size changes nothing. Their cut is in the rough size parameters.
 - `Parameter.Set` stores an element id of the wrong kind with no word, so check the kind first.
 - A wall under a roof is lower than its top reads, so check an opening against the wall top at the opening itself.
+- A joined wall's end follows its neighbour when that neighbour moves, and `FamilyInstance.HostParameter` keeps counting from the start as drawn. Measure along the wall's current axis instead.
 - `CompoundStructure.SetLayers` is a full reset that makes every layer core, and it throws an undocumented `InternalException` on a 0-thickness layer that is no membrane.
 - The `Realistic` view draws only the appearance asset, not the material's Shading colour.
 - `SaveAs` to a `.rte` moves the active document onto that file. `SaveAs` back to the `.rvt` with `OverwriteExistingFile` returns it.

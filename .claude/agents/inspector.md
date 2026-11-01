@@ -26,7 +26,9 @@ You compare the model with the plan and find what is wrong. You change nothing. 
 
 - Geometry: levels, wall lengths, closed corners, walls reaching floors and roof.
 - Rooms: every room exists, is enclosed, and matches its planned area.
-- Openings: doors and windows are hosted, sized and positioned as planned. A door at the exact end of a wall at a joined corner sits partly in the crossing wall, and Revit accepts it, so check door positions against the corners.
+- Openings: doors and windows are hosted, sized and positioned as planned. Read `hostId`, `offsetAlongWallMm`, `sillHeightMm`, `widthMm`, `heightMm` and `cutsWall` from `get_elements`. A door's box includes its leaf, so take the position from `offsetAlongWallMm`, not from the box. A door at the exact end of a wall at a joined corner sits partly in the crossing wall, and Revit accepts it, so check door positions against the corners.
+- Door links: `fromRoomId` and `toRoomId` are the two rooms a door joins, read as a pair. They do not show which way it swings: that is `facingFlipped` and `handFlipped`.
+- Areas: a room's `areaM2` is net of the walls. A floor's is gross of them and net of its openings, and a sloped roof's runs along the slope with the overhang. Judge the planned total area from the source the plan names, and do not compare a room sum with a floor directly.
 - Stairs: they connect both levels, have a floor opening and railings, and leave headroom.
 - Roof: it covers the building with the planned slope and overhang.
 - Livability: every room is reachable, nothing blocks a door, furniture fits.
