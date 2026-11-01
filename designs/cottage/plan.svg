@@ -1,0 +1,457 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1900 1810" width="1900" height="1810" font-family="Segoe UI, Arial, sans-serif">
+  <title>Коттедж: планы этажей и разрез</title>
+  <style>
+    .t1 { font-size: 27px; font-weight: 700; fill: #1f2a33; }
+    .t2 { font-size: 14px; fill: #4a5560; }
+    .h { font-size: 20px; font-weight: 700; fill: #1f2a33; }
+    .hs { font-size: 12.5px; fill: #5a6570; }
+    .r { font-size: 13px; font-weight: 600; fill: #1e1e1e; text-anchor: middle; }
+    .a { font-size: 12.5px; fill: #1e1e1e; text-anchor: middle; }
+    .s { font-size: 10.5px; fill: #5f5f5f; text-anchor: middle; }
+    .sm { font-size: 10.5px; fill: #333; text-anchor: middle; }
+    .n { font-size: 11.5px; fill: #444; }
+    .d { font-size: 11.5px; fill: #333; text-anchor: middle; }
+    .lv { font-size: 12px; fill: #333; }
+    .red { font-size: 11px; fill: #b3261e; text-anchor: middle; }
+    .halo { paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
+    .dl { fill: none; stroke: #666; stroke-width: 1; }
+    .w { fill: #BFE3F7; stroke: #2277bb; stroke-width: 40; }
+    .g { fill: #fff; stroke: none; }
+    .gw { fill: #F6C98A; stroke: #b5651d; stroke-width: 40; }
+    .rl { fill: none; stroke: #b5651d; stroke-width: 45; stroke-dasharray: 200 120; }
+    .door { fill: none; stroke: #444; stroke-width: 28; }
+    .sep { fill: none; stroke: #c2571a; stroke-width: 55; stroke-dasharray: 240 170; }
+    .wall { fill: none; stroke: #2b2b2b; }
+  </style>
+
+  <defs>
+    <g id="st">
+      <rect x="5700" y="5900" width="3000" height="2100" fill="#EFE6F5"/>
+      <path d="M5700 5900V6900M5950 5900V6900M6200 5900V6900M6450 5900V6900M6700 5900V6900M6950 5900V6900M7200 5900V6900M7450 5900V6900M7700 5900V6900M5700 7000V8000M5950 7000V8000M6200 7000V8000M6450 7000V8000M6700 7000V8000M6950 7000V8000M7200 7000V8000M7450 7000V8000M7700 7000V8000M5700 5900H7700M5700 6900H7700M5700 7000H7700M5700 8000H7700" fill="none" stroke="#7b6a8c" stroke-width="20"/>
+    </g>
+    <g id="up">
+      <path d="M5850 7500H8200V6400H6100" fill="none" stroke="#5a3e7a" stroke-width="45"/>
+      <path d="M6200 6240L5850 6400L6200 6560Z" fill="#5a3e7a"/>
+    </g>
+  </defs>
+
+  <rect x="0" y="0" width="1900" height="1810" fill="#ffffff"/>
+
+  <text class="t1" x="40" y="48">Коттедж в скандинавском стиле: планы этажей и разрез</text>
+  <text class="t2" x="40" y="74">Семья из четырёх человек. Дом 14,70 × 10,20 м, два полных этажа и жилая мансарда. Размеры в метрах, площади в квадратных метрах.</text>
+  <text class="t2" x="40" y="96">Демонстрационная модель, а не инженерный проект.</text>
+
+  <!-- Легенда -->
+  <g transform="translate(1000 118)">
+    <text class="h" x="0" y="6" style="font-size:16px">Обозначения</text>
+    <rect x="0" y="20" width="24" height="15" fill="#FBEFD9" stroke="#999"/><text class="n" x="30" y="32">Кухня, столовая, гостиные</text>
+    <rect x="210" y="20" width="24" height="15" fill="#DDEBF7" stroke="#999"/><text class="n" x="240" y="32">Спальни и жилые комнаты</text>
+    <rect x="420" y="20" width="24" height="15" fill="#D5F0EE" stroke="#999"/><text class="n" x="450" y="32">Ванные</text>
+    <rect x="0" y="46" width="24" height="15" fill="#F6F3EC" stroke="#999"/><text class="n" x="30" y="58">Прихожая, холлы</text>
+    <rect x="210" y="46" width="24" height="15" fill="#E6E6E6" stroke="#999"/><text class="n" x="240" y="58">Службы и гараж</text>
+    <rect x="420" y="46" width="24" height="15" fill="#EFE6F5" stroke="#999"/><text class="n" x="450" y="58">Лестница</text>
+    <rect x="0" y="72" width="24" height="15" fill="#BFE3F7" stroke="#2277bb" stroke-width="1.5"/><text class="n" x="30" y="84">Окно</text>
+    <path d="M214 86V74A12 12 0 0 1 226 86" fill="none" stroke="#444" stroke-width="1.5"/><text class="n" x="240" y="84">Дверь и куда открывается</text>
+    <path d="M420 79H446" fill="none" stroke="#c2571a" stroke-width="2.5" stroke-dasharray="6 4"/><text class="n" x="450" y="84">Граница зоны, стены нет</text>
+    <text class="n" x="0" y="118" style="font-size:13px">Площадь по наружному контуру: первый этаж 149,9 м² + второй этаж 149,9 м² = 299,9 м², гараж входит.</text>
+    <text class="n" x="0" y="138" style="font-size:13px">Комнаты: первый этаж 128,9 м², второй этаж 128,1 м², остальное занимают стены.</text>
+    <text class="n" x="0" y="158" style="font-size:13px">Мансарда сверх этого: комнаты 84,8 м², кладовые 46,5 м². Терраса 28,8 м².</text>
+  </g>
+
+  <!-- Север -->
+  <g transform="translate(1800 165)">
+    <circle cx="0" cy="0" r="40" fill="#fff" stroke="#555" stroke-width="1.5"/>
+    <path d="M0 -36L13 12L0 4Z" fill="#1f2a33"/>
+    <path d="M0 -36L-13 12L0 4Z" fill="#9aa5ad"/>
+    <text x="0" y="-46" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2a33">Север</text>
+  </g>
+
+  <!-- Первый этаж -->
+  <text class="h" x="80" y="146">Первый этаж</text>
+  <text class="hs" x="205" y="146">149,9 м² по контуру. Потолок 2,65 м, в гараже 2,82 м</text>
+
+  <g transform="translate(130 860) scale(0.05 -0.05)">
+    <rect x="-1000" y="-4700" width="16500" height="18700" fill="#E3F0D8"/>
+    <path d="M10550 14000V13050H3300V10050H3825V11550H5625V10050H10700V9900H14400V10050H14550V14000Z" fill="#D5D5D5" stroke="#9a9a9a" stroke-width="20"/>
+    <rect x="3825" y="10050" width="1800" height="1500" fill="#C2C2C2" stroke="#8a8a8a" stroke-width="20"/>
+    <rect x="-150" y="-4150" width="7200" height="4000" fill="#E7CFA8" stroke="#a9875a" stroke-width="30"/>
+    <path d="M-150 -650H7050M-150 -1150H7050M-150 -1650H7050M-150 -2150H7050M-150 -2650H7050M-150 -3150H7050M-150 -3650H7050" fill="none" stroke="#cfae7e" stroke-width="15"/>
+
+    <rect x="150" y="150" width="5550" height="4350" fill="#FBEFD9"/>
+    <rect x="5700" y="150" width="3600" height="4350" fill="#FBEFD9"/>
+    <rect x="5750" y="4500" width="2950" height="1300" fill="#FBEFD9"/>
+    <rect x="9300" y="150" width="4950" height="3750" fill="#FBEFD9"/>
+    <rect x="9300" y="3900" width="1300" height="600" fill="#FBEFD9"/>
+    <rect x="3800" y="4700" width="1900" height="5050" fill="#F6F3EC"/>
+    <rect x="150" y="4700" width="3450" height="5050" fill="#DDEBF7"/>
+    <rect x="5750" y="8100" width="2950" height="1650" fill="#D5F0EE"/>
+    <rect x="8900" y="4700" width="1700" height="2650" fill="#E6E6E6"/>
+    <rect x="8900" y="7450" width="1700" height="2300" fill="#E6E6E6"/>
+    <rect x="10800" y="4100" width="3450" height="5650" fill="#E6E6E6"/>
+    <rect x="10800" y="5200" width="900" height="1200" fill="#F2F2F2" stroke="#888" stroke-width="20"/>
+    <use xlink:href="#st"/>
+    <use xlink:href="#up"/>
+
+    <rect class="wall" x="0" y="0" width="14400" height="9900" stroke-width="300"/>
+    <path class="wall" stroke-width="200" d="M0 4600H5700M3700 4600V9900M8800 4600V9900M8800 4600H10700M10700 4000V9900M14400 4000H10700"/>
+    <path class="wall" stroke-width="100" d="M5700 4600V5850M5700 5850H8800M5700 8050H8800M5700 8050V9900M8800 7400H10700"/>
+
+    <rect class="w" x="400" y="-150" width="3000" height="300"/>
+    <rect class="w" x="5750" y="-150" width="3000" height="300"/>
+    <rect class="w" x="10400" y="-150" width="2400" height="300"/>
+    <rect class="w" x="1175" y="9750" width="1500" height="300"/>
+    <rect class="w" x="6800" y="9750" width="900" height="300"/>
+    <rect class="w" x="9300" y="9750" width="900" height="300"/>
+    <rect class="w" x="-150" y="1100" width="300" height="2400"/>
+    <rect class="w" x="-150" y="6500" width="300" height="1500"/>
+    <rect class="w" x="14250" y="1250" width="300" height="1500"/>
+    <rect class="w" x="14250" y="6550" width="300" height="900"/>
+
+    <rect class="g" x="4275" y="9750" width="900" height="300"/>
+    <rect class="g" x="3800" y="-150" width="1800" height="300"/>
+    <rect class="gw" x="11325" y="9750" width="2400" height="300"/>
+    <path class="rl" d="M11325 9750V7300M13725 9750V7300"/>
+    <rect class="g" x="3975" y="4500" width="1500" height="200"/>
+    <rect class="g" x="3600" y="7900" width="200" height="800"/>
+    <rect class="g" x="5650" y="8300" width="100" height="800"/>
+    <rect class="g" x="9350" y="4500" width="800" height="200"/>
+    <rect class="g" x="9350" y="7350" width="800" height="100"/>
+    <rect class="g" x="10600" y="5400" width="200" height="800"/>
+    <path class="door" d="M4275 9750V8850A900 900 0 0 1 5175 9750"/>
+    <path class="door" d="M3800 150V1050A900 900 0 0 0 4700 150"/>
+    <path class="door" d="M5600 150V1050A900 900 0 0 1 4700 150"/>
+    <path class="door" d="M3975 4500V3750A750 750 0 0 1 4725 4500"/>
+    <path class="door" d="M5475 4500V3750A750 750 0 0 0 4725 4500"/>
+    <path class="door" d="M3600 7900H2800A800 800 0 0 0 3600 8700"/>
+    <path class="door" d="M5750 8300H6550A800 800 0 0 1 5750 9100"/>
+    <path class="door" d="M9350 4700V5500A800 800 0 0 0 10150 4700"/>
+    <path class="door" d="M9350 7450V8250A800 800 0 0 0 10150 7450"/>
+    <path class="door" d="M10600 6200H9800A800 800 0 0 1 10600 5400"/>
+
+    <path class="sep" d="M5700 150V4500M9300 150V4500M5700 5900V8000"/>
+  </g>
+
+  <g transform="translate(130 860)">
+    <text class="r" x="125" y="-125">Гостиная</text>
+    <text class="a" x="125" y="-109">24,1 м²</text>
+    <text class="s" x="125" y="-94">5,55 × 4,35</text>
+    <text class="r" x="375" y="-125">Столовая</text>
+    <text class="a" x="375" y="-109">19,5 м²</text>
+    <text class="s" x="375" y="-94">3,60 × 4,35 и ниша</text>
+    <text class="r" x="590" y="-105">Кухня</text>
+    <text class="a" x="590" y="-89">19,3 м²</text>
+    <text class="s" x="590" y="-74">4,95 × 3,75 и ниша</text>
+    <text class="r" x="236" y="-350">Прихожая</text>
+    <text class="a" x="236" y="-334">9,4 м²</text>
+    <text class="s" x="236" y="-320">1,85 × 5,05</text>
+    <text class="r" x="94" y="-280">Гостевая спальня</text>
+    <text class="a" x="94" y="-264">17,4 м²</text>
+    <text class="s" x="94" y="-249">3,45 × 5,05</text>
+    <text class="r" x="380" y="-455">Санузел</text>
+    <text class="a" x="380" y="-439">4,9 м²</text>
+    <text class="r" x="487" y="-340">Прачечная</text>
+    <text class="a" x="487" y="-325">4,5 м²</text>
+    <text class="r" x="487" y="-445">Котельная</text>
+    <text class="a" x="487" y="-430">3,9 м²</text>
+    <text class="r" x="626" y="-350">Гараж</text>
+    <text class="a" x="626" y="-334">19,5 м²</text>
+    <text class="s" x="626" y="-319">3,45 × 5,65, на 170 мм ниже</text>
+    <text class="s" x="626" y="-452">направляющие ворот</text>
+    <text class="s" x="626" y="-438">идут на 2,6 м вглубь</text>
+    <text class="s" x="626" y="-424">под потолком</text>
+    <text class="s" x="563" y="-286" style="font-size:9.5px">ступень</text>
+    <text class="sm halo" x="340" y="-343">Лестница 6,3 м²</text>
+    <text class="sm halo" x="312" y="-392">вверх</text>
+
+    <text class="r" x="172" y="105">Терраса</text>
+    <text class="a" x="172" y="121">28,8 м², деревянный настил</text>
+    <text class="s" x="172" y="136">7,20 × 4,00, на одну ступень выше газона</text>
+    <text class="s" x="235" y="22">выход из гостиной</text>
+
+    <text class="n" x="380" y="40">Кухня, столовая и гостиная: одно открытое пространство 63,0 м²</text>
+    <text class="n" x="380" y="56">с большими окнами в сад. Пунктир показывает границу зоны.</text>
+    <text class="r" x="570" y="130" style="fill:#4d7a3a">Сад</text>
+
+    <text class="r" x="370" y="-622">Площадка у дома</text>
+    <text class="s" x="370" y="-607">бетон</text>
+    <text class="r" x="228" y="-556">Вход</text>
+    <text class="sm" x="228" y="-540">крыльцо</text>
+    <text class="s" x="228" y="-526">одна ступень</text>
+    <path d="M268 -572V-512" fill="none" stroke="#444" stroke-width="1.5"/>
+    <path d="M262 -526L268 -511L274 -526Z" fill="#444"/>
+    <text class="r" x="627" y="-640">Въезд в гараж</text>
+    <text class="s" x="627" y="-625">ширина 4,00 м</text>
+    <path d="M626 -612V-545" fill="none" stroke="#444" stroke-width="1.5"/>
+    <path d="M620 -555L626 -540L632 -555Z" fill="#444"/>
+    <text class="sm" x="626" y="-518">Подъёмные ворота, ширина 2,40 м</text>
+    <text class="n" x="60" y="-580">Улица с севера</text>
+
+    <path class="dl" d="M0 226H720M0 220V232M285 220V232M465 220V232M720 220V232"/>
+    <text class="d" x="142" y="221">5,70</text><text class="d" x="375" y="221">3,60</text><text class="d" x="592" y="221">5,10</text>
+    <path class="dl" d="M-7.5 252H727.5M-7.5 246V258M727.5 246V258"/>
+    <text class="d" x="360" y="247">14,70 м</text>
+    <path class="dl" d="M-60 0V-495M-66 0H-54M-66 -230H-54M-66 -495H-54"/>
+    <text class="d" transform="translate(-65 -115) rotate(-90)">4,60</text>
+    <text class="d" transform="translate(-65 -362) rotate(-90)">5,30</text>
+    <path class="dl" d="M-85 7.5V-502.5M-91 7.5H-79M-91 -502.5H-79"/>
+    <text class="d" transform="translate(-90 -247) rotate(-90)">10,20 м</text>
+    <path class="dl" d="M790 0V-495M784 0H796M784 -200H796M784 -495H796"/>
+    <text class="d" transform="translate(806 -100) rotate(-90)">4,00</text>
+    <text class="d" transform="translate(806 -347) rotate(-90)">5,90</text>
+  </g>
+
+  <!-- Второй этаж -->
+  <text class="h" x="1000" y="335">Второй этаж</text>
+  <text class="hs" x="1125" y="335">149,9 м² по контуру. Потолок 2,65 м</text>
+
+  <g transform="translate(1060 860) scale(0.05 -0.05)">
+    <rect x="150" y="150" width="5500" height="4350" fill="#DDEBF7"/>
+    <rect x="150" y="4700" width="3450" height="1850" fill="#E6E6E6"/>
+    <rect x="150" y="6650" width="3450" height="3100" fill="#D5F0EE"/>
+    <rect x="3800" y="4700" width="1900" height="3300" fill="#F6F3EC"/>
+    <rect x="3800" y="8000" width="1850" height="1750" fill="#F6F3EC"/>
+    <rect x="5750" y="150" width="3000" height="4550" fill="#FBEFD9"/>
+    <rect x="5700" y="4700" width="3100" height="1100" fill="#FBEFD9"/>
+    <rect x="8800" y="4700" width="1800" height="1100" fill="#F6F3EC"/>
+    <rect x="8850" y="150" width="5400" height="3750" fill="#DDEBF7"/>
+    <rect x="8850" y="3900" width="1750" height="600" fill="#DDEBF7"/>
+    <rect x="10800" y="4100" width="3450" height="5650" fill="#DDEBF7"/>
+    <rect x="8900" y="5900" width="1700" height="3850" fill="#D5F0EE"/>
+    <rect x="5750" y="8100" width="2950" height="1650" fill="#E6E6E6"/>
+    <use xlink:href="#st"/>
+    <use xlink:href="#up"/>
+
+    <rect class="wall" x="0" y="0" width="14400" height="9900" stroke-width="300"/>
+    <path class="wall" stroke-width="200" d="M0 4600H5700M3700 4600V9900M8800 5850V9900M8800 4600H10700M10700 4000V9900M14400 4000H10700"/>
+    <path class="wall" stroke-width="100" d="M5700 0V4600M8800 0V4600M5700 5850H8800M5700 8050H8800M5700 8050V9900M8800 5850H10700M0 6600H3700"/>
+
+    <rect class="w" x="700" y="-150" width="2400" height="300"/>
+    <rect class="w" x="3950" y="-150" width="1500" height="300"/>
+    <rect class="w" x="6050" y="-150" width="2400" height="300"/>
+    <rect class="w" x="10400" y="-150" width="2400" height="300"/>
+    <rect class="w" x="1475" y="9750" width="900" height="300"/>
+    <rect class="w" x="3975" y="9750" width="1500" height="300"/>
+    <rect class="w" x="6800" y="9750" width="900" height="300"/>
+    <rect class="w" x="9300" y="9750" width="900" height="300"/>
+    <rect class="w" x="11800" y="9750" width="1500" height="300"/>
+    <rect class="w" x="-150" y="1550" width="300" height="1500"/>
+    <rect class="w" x="-150" y="6800" width="300" height="900"/>
+    <rect class="w" x="14250" y="1250" width="300" height="1500"/>
+    <rect class="w" x="14250" y="5800" width="300" height="2400"/>
+
+    <rect class="g" x="4325" y="4500" width="800" height="200"/>
+    <rect class="g" x="1500" y="4500" width="800" height="200"/>
+    <rect class="g" x="1500" y="6550" width="800" height="100"/>
+    <rect class="g" x="5650" y="8300" width="100" height="800"/>
+    <rect class="g" x="9350" y="4500" width="800" height="200"/>
+    <rect class="g" x="10600" y="4850" width="200" height="800"/>
+    <rect class="g" x="9350" y="5800" width="800" height="100"/>
+    <path class="door" d="M4325 4500V3700A800 800 0 0 1 5125 4500"/>
+    <path class="door" d="M1500 4700V5500A800 800 0 0 0 2300 4700"/>
+    <path class="door" d="M1500 6650V7450A800 800 0 0 0 2300 6650"/>
+    <path class="door" d="M5750 8300H6550A800 800 0 0 1 5750 9100"/>
+    <path class="door" d="M9350 4500V3700A800 800 0 0 1 10150 4500"/>
+    <path class="door" d="M10800 4850H11600A800 800 0 0 1 10800 5650"/>
+    <path class="door" d="M9350 5900V6700A800 800 0 0 0 10150 5900"/>
+
+    <path class="sep" d="M5700 4700V5800M8800 4700V5800M5700 5900V8000"/>
+  </g>
+
+  <g transform="translate(1060 860)">
+    <text class="r" x="145" y="-125">Спальня родителей</text>
+    <text class="a" x="145" y="-109">23,9 м²</text>
+    <text class="s" x="145" y="-94">5,50 × 4,35</text>
+    <text class="r" x="94" y="-304">Гардеробная</text>
+    <text class="a" x="94" y="-289">6,4 м²</text>
+    <text class="r" x="94" y="-425">Ванная родителей</text>
+    <text class="a" x="94" y="-409">10,7 м²</text>
+    <text class="s" x="94" y="-394">3,45 × 3,10</text>
+    <text class="r" x="236" y="-350">Холл</text>
+    <text class="a" x="236" y="-334">9,5 м²</text>
+    <text class="s" x="236" y="-320">1,90 × 5,05</text>
+    <text class="r" x="362" y="-130">Семейная гостиная</text>
+    <text class="a" x="362" y="-114">17,1 м²</text>
+    <text class="s" x="362" y="-99">3,00 × 4,55 и проход</text>
+    <text class="sm" x="486" y="-263" style="font-weight:600">Коридор</text>
+    <text class="sm" x="486" y="-250">2,0 м²</text>
+    <text class="r" x="580" y="-105">Детская 1</text>
+    <text class="a" x="580" y="-89">21,3 м²</text>
+    <text class="s" x="580" y="-74">5,40 × 3,75 и ниша</text>
+    <text class="r" x="626" y="-350">Детская 2</text>
+    <text class="a" x="626" y="-334">19,5 м²</text>
+    <text class="s" x="626" y="-319">3,45 × 5,65, над гаражом</text>
+    <text class="r" x="487" y="-408">Ванная</text>
+    <text class="r" x="487" y="-393">детская</text>
+    <text class="a" x="487" y="-377">6,5 м²</text>
+    <text class="r" x="380" y="-455">Бельевая</text>
+    <text class="a" x="380" y="-439">4,9 м²</text>
+    <text class="sm halo" x="340" y="-343">Лестница 6,3 м²</text>
+    <text class="sm halo" x="330" y="-392">вверх, на мансарду</text>
+
+    <path class="dl" d="M0 36H720M0 30V42M285 30V42M440 30V42M720 30V42"/>
+    <text class="d" x="142" y="31">5,70</text><text class="d" x="362" y="31">3,10</text><text class="d" x="580" y="31">5,60</text>
+    <path class="dl" d="M-7.5 62H727.5M-7.5 56V68M727.5 56V68"/>
+    <text class="d" x="360" y="57">14,70 м</text>
+    <path class="dl" d="M-40 0V-495M-46 0H-34M-46 -230H-34M-46 -495H-34"/>
+    <text class="d" transform="translate(-45 -115) rotate(-90)">4,60</text>
+    <text class="d" transform="translate(-45 -362) rotate(-90)">5,30</text>
+    <path class="dl" d="M750 7.5V-502.5M744 7.5H756M744 -502.5H756"/>
+    <text class="d" transform="translate(766 -247) rotate(-90)">10,20 м</text>
+  </g>
+
+  <!-- Мансарда -->
+  <text class="h" x="80" y="1165">Мансарда</text>
+  <text class="hs" x="185" y="1165">Комнаты 84,8 м², кладовые 46,5 м². Окна только в торцах дома. В 300 м² не входит</text>
+
+  <g transform="translate(130 1700) scale(0.05 -0.05)">
+    <rect x="-400" y="-400" width="15200" height="10700" fill="#F4F4F2" stroke="#6b6f73" stroke-width="30" stroke-dasharray="200 150"/>
+    <rect x="150" y="1900" width="3500" height="6100" fill="#DDEBF7"/>
+    <rect x="3750" y="1900" width="5000" height="6100" fill="#F6F3EC"/>
+    <rect x="8850" y="1900" width="5400" height="6100" fill="#DDEBF7"/>
+    <rect x="150" y="150" width="14100" height="1650" fill="#ECE4D6"/>
+    <rect x="150" y="8100" width="14100" height="1650" fill="#ECE4D6"/>
+    <use xlink:href="#st"/>
+    <use xlink:href="#up"/>
+
+    <rect class="wall" x="0" y="0" width="14400" height="9900" stroke-width="300"/>
+    <path class="wall" stroke-width="100" d="M0 1850H14400M0 8050H14400M3700 1850V8050M8800 1850V8050"/>
+
+    <path d="M-400 4950H14800" fill="none" stroke="#6b6f73" stroke-width="30" stroke-dasharray="500 150 100 150"/>
+    <path d="M150 1700H14250M150 8200H14250" fill="none" stroke="#b3261e" stroke-width="25" stroke-dasharray="160 120"/>
+
+    <rect class="w" x="-150" y="2450" width="300" height="900"/>
+    <rect class="w" x="-150" y="3750" width="300" height="2400"/>
+    <rect class="w" x="-150" y="6550" width="300" height="900"/>
+    <rect class="w" x="14250" y="2450" width="300" height="900"/>
+    <rect class="w" x="14250" y="3750" width="300" height="2400"/>
+    <rect class="w" x="14250" y="6550" width="300" height="900"/>
+
+    <rect class="g" x="3650" y="4550" width="100" height="800"/>
+    <rect class="g" x="8750" y="3050" width="100" height="1500"/>
+    <rect class="g" x="4300" y="8000" width="800" height="100"/>
+    <rect class="g" x="5800" y="1800" width="800" height="100"/>
+    <path class="door" d="M3650 4550H2850A800 800 0 0 0 3650 5350"/>
+    <path class="door" d="M8850 3050H9600A750 750 0 0 1 8850 3800"/>
+    <path class="door" d="M8850 4550H9600A750 750 0 0 0 8850 3800"/>
+    <path class="door" d="M4300 8000V7200A800 800 0 0 1 5100 8000"/>
+    <path class="door" d="M5800 1900V2700A800 800 0 0 0 6600 1900"/>
+
+    <path d="M5700 5900H8750M5700 8000V6900" fill="none" stroke="#d0021b" stroke-width="70"/>
+  </g>
+
+  <g transform="translate(130 1700)">
+    <text class="r" x="95" y="-160">Кабинет</text>
+    <text class="a" x="95" y="-144">21,4 м²</text>
+    <text class="s" x="95" y="-129">3,50 × 6,10</text>
+    <text class="r" x="235" y="-170">Холл мансарды</text>
+    <text class="a" x="235" y="-154">30,5 м²</text>
+    <text class="s" x="235" y="-140">вместе с лестницей</text>
+    <text class="r" x="600" y="-160">Игровая</text>
+    <text class="a" x="600" y="-144">32,9 м²</text>
+    <text class="s" x="600" y="-129">5,40 × 6,10</text>
+    <text class="a" x="475" y="-448">Кладовая под скатом 23,3 м²: высота от 0,65 до 2,30 м</text>
+    <text class="a" x="475" y="-40">Кладовая под скатом 23,3 м²: высота от 0,65 до 2,30 м</text>
+    <text class="sm halo" x="340" y="-343">Лестница</text>
+    <text class="sm halo" x="312" y="-310">вниз</text>
+    <text class="red" x="400" y="-280">ограждение</text>
+    <text class="s halo" x="60" y="-253">конёк</text>
+    <text class="red" x="640" y="-418">высота потолка 2,2 м</text>
+    <text class="red" x="640" y="-71">высота потолка 2,2 м</text>
+    <text class="s" x="690" y="18">край крыши</text>
+
+    <path class="dl" d="M0 42H720M0 36V48M185 36V48M440 36V48M720 36V48"/>
+    <text class="d" x="92" y="37">3,70</text><text class="d" x="312" y="37">5,10</text><text class="d" x="580" y="37">5,60</text>
+    <path class="dl" d="M-7.5 66H727.5M-7.5 60V72M727.5 60V72"/>
+    <text class="d" x="360" y="61">14,70 м</text>
+    <path class="dl" d="M-40 0V-495M-46 0H-34M-46 -92.5H-34M-46 -402.5H-34M-46 -495H-34"/>
+    <text class="d" transform="translate(-45 -46) rotate(-90)">1,85</text>
+    <text class="d" transform="translate(-45 -247) rotate(-90)">6,20</text>
+    <text class="d" transform="translate(-45 -449) rotate(-90)">1,85</text>
+    <path class="dl" d="M-65 7.5V-502.5M-71 7.5H-59M-71 -502.5H-59"/>
+    <text class="d" transform="translate(-70 -247) rotate(-90)">10,20 м</text>
+  </g>
+
+  <!-- Разрез -->
+  <text class="h" x="990" y="1030">Разрез через середину дома</text>
+  <text class="hs" x="990" y="1050">Вид на запад: слева юг и сад, справа север и улица. Показаны высоты этажей, уклон крыши и высота в мансарде</text>
+
+  <g transform="translate(1190 1730) scale(0.05 -0.05)">
+    <rect x="-2000" y="-1000" width="14500" height="800" fill="#CFE3BD"/>
+    <rect x="10050" y="-520" width="2450" height="350" fill="#C9C9C9"/>
+
+    <rect x="150" y="150" width="5650" height="2500" fill="#FBEFD9"/>
+    <rect x="5900" y="0" width="2100" height="6000" fill="#EFE6F5"/>
+    <rect x="8100" y="150" width="1650" height="2500" fill="#D5F0EE"/>
+    <rect x="150" y="3150" width="5650" height="2500" fill="#FBEFD9"/>
+    <rect x="8100" y="3150" width="1650" height="2500" fill="#E6E6E6"/>
+    <path d="M150 6000H1800V8300L150 6650Z" fill="#ECE4D6"/>
+    <path d="M8100 6000H9750V6650L8100 8300Z" fill="#ECE4D6"/>
+    <path d="M1900 6000H8000V8400L4950 11450L1900 8400Z" fill="#F6F3EC"/>
+
+    <rect x="0" y="-150" width="9900" height="150" fill="#8f8f8f"/>
+    <rect x="150" y="2700" width="5750" height="300" fill="#8f8f8f"/>
+    <rect x="8000" y="2700" width="1750" height="300" fill="#8f8f8f"/>
+    <rect x="150" y="5700" width="5750" height="300" fill="#8f8f8f"/>
+    <rect x="8000" y="5700" width="1750" height="300" fill="#8f8f8f"/>
+
+    <path d="M150 2650H5800M8100 2650H9750M150 5650H5800M8100 5650H9750" fill="none" stroke="#777" stroke-width="30"/>
+
+    <rect x="5800" y="0" width="100" height="6000" fill="#2b2b2b"/>
+    <rect x="8000" y="0" width="100" height="8400" fill="#2b2b2b"/>
+    <rect x="1800" y="6000" width="100" height="2350" fill="#2b2b2b"/>
+
+    <rect x="7000" y="970" width="1000" height="60" fill="#5a3e7a"/>
+    <rect x="5900" y="1803" width="1000" height="60" fill="#5a3e7a"/>
+    <rect x="7000" y="3970" width="1000" height="60" fill="#5a3e7a"/>
+    <rect x="5900" y="4803" width="1000" height="60" fill="#5a3e7a"/>
+
+    <path d="M-150 -200H150V6650L-150 6350Z" fill="#2b2b2b"/>
+    <path d="M9750 -200H10050V6350L9750 6650Z" fill="#2b2b2b"/>
+
+    <path d="M-400 6100L4950 11450L10300 6100V6666L4950 12016L-400 6666Z" fill="#3A3F45"/>
+
+    <path d="M1700 8200H8200" fill="none" stroke="#b3261e" stroke-width="35" stroke-dasharray="180 120"/>
+    <path d="M5900 6000V7100" fill="none" stroke="#d0021b" stroke-width="70"/>
+  </g>
+
+  <path d="M990 1730H1180M990 1580H1180M990 1430H1180M990 1405H1180M990 1157.5H1430M990 1129H1430" fill="none" stroke="#999" stroke-width="1" stroke-dasharray="4 3"/>
+  <text class="lv" x="990" y="1125">Около +12,0 верх крыши</text>
+  <text class="lv" x="990" y="1153">+11,45 низ конька</text>
+  <text class="lv" x="990" y="1401">+6,50 низ крыши у стены</text>
+  <text class="lv" x="990" y="1426">+6,00 пол мансарды</text>
+  <text class="lv" x="990" y="1576">+3,00 пол второго этажа</text>
+  <text class="lv" x="990" y="1726">±0,00 пол первого этажа</text>
+  <text class="lv" x="990" y="1754">-0,20 газон</text>
+
+  <text class="r" x="1380" y="1362">Холл мансарды</text>
+  <text class="s" x="1235" y="1408">кладовая</text>
+  <text class="s" x="1640" y="1408">кладовая</text>
+  <text class="r" x="1335" y="1520">Семейная гостиная</text>
+  <text class="r" x="1640" y="1520">Бельевая</text>
+  <text class="r" x="1335" y="1670">Столовая</text>
+  <text class="r" x="1640" y="1670">Санузел</text>
+  <text class="sm halo" x="1537" y="1660">лестница</text>
+  <text class="sm halo" x="1537" y="1510">лестница</text>
+  <text class="s" x="1490" y="1388" style="fill:#b3261e;text-anchor:start">ограждение</text>
+  <text class="s" x="1250" y="1616">потолок 2,65 м</text>
+  <text class="s" x="1250" y="1466">потолок 2,65 м</text>
+
+  <text class="a" x="1226" y="1290" style="text-anchor:end">уклон 45°</text>
+  <text class="a" x="1650" y="1290" style="text-anchor:start">уклон 45°</text>
+  <text class="s" x="1712" y="1416" style="text-anchor:start">свес 0,40 м</text>
+  <text class="s" x="1775" y="1705">площадка, бетон</text>
+
+  <text class="red" x="1438" y="1312">высота от 2,2 м: ширина 6,5 м</text>
+  <path class="dl" d="M1437.5 1430V1157.5M1432 1430H1443M1432 1157.5H1443"/>
+  <text class="d" x="1446" y="1240" style="text-anchor:start">5,45 м под коньком</text>
+  <path class="dl" d="M1286 1430V1310M1281 1430H1291M1281 1310H1291"/>
+  <text class="d" x="1292" y="1412" style="text-anchor:start">2,40 м у перегородки</text>
+
+  <path class="dl" d="M1165 1730V1430M1160 1730H1170M1160 1580H1170M1160 1430H1170"/>
+  <text class="d" transform="translate(1160 1655) rotate(-90)">3,00</text>
+  <text class="d" transform="translate(1160 1505) rotate(-90)">3,00</text>
+
+  <path class="dl" d="M1182.5 1772H1692.5M1182.5 1766V1778M1692.5 1766V1778"/>
+  <text class="d" x="1437" y="1767">10,20 м</text>
+</svg>
