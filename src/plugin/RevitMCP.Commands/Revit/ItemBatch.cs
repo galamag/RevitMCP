@@ -53,6 +53,8 @@ internal static class ItemBatch
     /// element at the same time and returns what to warn about that item: a created item has no other way to carry a warning.
     /// <paramref name="problemAfterCommit"/>, when given, gets each new element after the commit too, and returns why it does not hold, or
     /// <c>null</c> when it does: for an element that Revit can leave in the model in a state the in-transaction check did not see.
+    /// <paramref name="landedStatus"/> is the status of an item that landed: <see cref="ItemStatus.Created"/>, or <see cref="ItemStatus.Updated"/>
+    /// for a batch that changes elements that exist, where "created" would be untrue. Its elements are then the ones that were changed.
     /// </summary>
     public static JsonElement Run<T>(
         Document document,
@@ -61,8 +63,9 @@ internal static class ItemBatch
         Func<T, Element> create,
         Func<Element, object> readBack,
         Func<Element, IReadOnlyList<string>>? warningsOf = null,
-        Func<Element, string?>? problemAfterCommit = null) =>
-        RunMany(document, method, entries, input => [create(input)], readBack, warningsOf, problemAfterCommit);
+        Func<Element, string?>? problemAfterCommit = null,
+        string landedStatus = ItemStatus.Created) =>
+        RunMany(document, method, entries, input => [create(input)], readBack, warningsOf, problemAfterCommit, landedStatus);
 
     /// <summary>
     /// <see cref="Run{T}"/> for an item that makes several elements, such as the railings of a stairs. The first element is the one
@@ -76,17 +79,18 @@ internal static class ItemBatch
         Func<T, IReadOnlyList<Element>> create,
         Func<Element, object> readBack,
         Func<Element, IReadOnlyList<string>>? warningsOf = null,
-        Func<Element, string?>? problemAfterCommit = null)
+        Func<Element, string?>? problemAfterCommit = null,
+        string landedStatus = ItemStatus.Created)
     {
         var results = entries.Select(entry => entry.Settled).ToArray();
         var alsoCreated = new Dictionary<int, IReadOnlyList<ElementId>>();
         var outcome = results.All(result => result is not null)
             ? new OperationOutcome(true, [], [], [])
-            : Operation.Run(document, method, scope => CreateAll(document, entries, results, create, alsoCreated, method, scope));
+            : Operation.Run(document, method, scope => CreateAll(document, entries, results, create, alsoCreated, method, landedStatus, scope));
 
         if (outcome.Committed)
         {
-            ReadBackAll(document, results, readBack, warningsOf, method, alsoCreated, problemAfterCommit);
+            ReadBackAll(document, results, readBack, warningsOf, method, alsoCreated, problemAfterCommit, landedStatus);
         }
 
         var batch = new BatchResult();
@@ -110,6 +114,7 @@ internal static class ItemBatch
         Func<T, IReadOnlyList<Element>> create,
         Dictionary<int, IReadOnlyList<ElementId>> alsoCreated,
         string method,
+        string landedStatus,
         OperationScope scope)
     {
         foreach (var (entry, position) in entries.Select((entry, position) => (entry, position)))
@@ -129,7 +134,7 @@ internal static class ItemBatch
                 }
 
                 document.Regenerate();
-                results[position] = new ItemResult(entry.Index, ItemStatus.Created, elements[0].Id.ToString(), entry.Requested, null, [], null);
+                results[position] = new ItemResult(entry.Index, landedStatus, elements[0].Id.ToString(), entry.Requested, null, [], null);
 
                 if (elements.Count > 1)
                 {
@@ -159,7 +164,8 @@ internal static class ItemBatch
     /// The batch has landed by now, so a failure here must not read as a failed call. <paramref name="alsoCreated"/>, when given, holds
     /// by position the further elements of an item that made several, and one of them that is gone fails the item.
     /// <paramref name="problemAfterCommit"/>, when given, also fails the item that it gives a reason for: the element is still in the model,
-    /// so the error names it, and the rest of the batch has landed.
+    /// so the error names it, and the rest of the batch has landed. Only the items whose status is <paramref name="landedStatus"/> are read back:
+    /// the others were settled with no change and carry their report already.
     /// </summary>
     public static void ReadBackAll(
         Document document,
@@ -168,11 +174,12 @@ internal static class ItemBatch
         Func<Element, IReadOnlyList<string>>? warningsOf,
         string method,
         IReadOnlyDictionary<int, IReadOnlyList<ElementId>>? alsoCreated = null,
-        Func<Element, string?>? problemAfterCommit = null)
+        Func<Element, string?>? problemAfterCommit = null,
+        string landedStatus = ItemStatus.Created)
     {
         for (var position = 0; position < results.Length; position++)
         {
-            if (results[position] is not { Status: ItemStatus.Created, ElementId: { } id } created)
+            if (results[position] is not { ElementId: { } id } created || created.Status != landedStatus)
             {
                 continue;
             }
@@ -186,7 +193,7 @@ internal static class ItemBatch
                     // Revit removed it while committing, so it is not in the model and must not read as created.
                     Log.Error($"{method} element {id} is gone after the commit.");
                     results[position] = created.FailedAfterCommit(
-                        $"Revit removed this element when it committed the batch (it was created as {id} and is gone). The rest of the batch landed.");
+                        $"Revit removed this element when it committed the batch ({(landedStatus == ItemStatus.Created ? $"it was created as {id}" : $"element {id} was changed")} and is gone). The rest of the batch landed.");
                     continue;
                 }
 

@@ -33,6 +33,7 @@ public static class MethodNames
     public const string CreateRooms = "create_rooms";
     public const string CreateRoomSeparators = "create_room_separators";
     public const string AttachWalls = "attach_walls";
+    public const string UpdateElements = "update_elements";
     public const string DeleteElements = "delete_elements";
     public const string UndoLastOperation = "undo_last_operation";
     public const string GetLastUndoResult = "get_last_undo_result";
@@ -70,6 +71,7 @@ public static class MethodNames
         CreateRooms,
         CreateRoomSeparators,
         AttachWalls,
+        UpdateElements,
         DeleteElements,
         UndoLastOperation,
         GetLastUndoResult,

@@ -57,6 +57,7 @@ public sealed class CommandRegistry
         new CreateRoomsCommand(),
         new CreateRoomSeparatorsCommand(),
         new AttachWallsCommand(),
+        new UpdateElementsCommand(),
         new DeleteElementsCommand(),
         new UndoLastOperationCommand(undoTracker),
         new GetLastUndoResultCommand(undoTracker),

@@ -49,4 +49,28 @@ public class ItemResultTests
         Assert.Equal("300307", created.ElementId);
         Assert.Null(created.Error);
     }
+
+    [Fact]
+    public void Statuses_AreTheWordsTheToolTextUses()
+    {
+        Assert.Equal("created", ItemStatus.Created);
+        Assert.Equal("updated", ItemStatus.Updated);
+        Assert.Equal("unchanged", ItemStatus.Unchanged);
+        Assert.Equal("already_existed", ItemStatus.AlreadyExisted);
+        Assert.Equal("failed", ItemStatus.Failed);
+        Assert.Equal("rolled_back", ItemStatus.RolledBack);
+    }
+
+    [Fact]
+    public void FailedAfterCommit_OfAnUpdatedItem_IsFailedWithNoElementAndNoActual()
+    {
+        var updated = Created() with { Status = ItemStatus.Updated };
+
+        var failed = updated.FailedAfterCommit("After the commit the element holds another type.");
+
+        Assert.Equal(ItemStatus.Failed, failed.Status);
+        Assert.Null(failed.ElementId);
+        Assert.Null(failed.Actual);
+        Assert.Equal(ItemStatus.Updated, updated.Status);
+    }
 }

@@ -6,6 +6,8 @@ namespace RevitMCP.Commands;
 public static class ItemStatus
 {
     public const string Created = "created";
+    public const string Updated = "updated";
+    public const string Unchanged = "unchanged";
     public const string AlreadyExisted = "already_existed";
     public const string Failed = "failed";
     public const string RolledBack = "rolled_back";

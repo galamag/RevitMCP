@@ -903,6 +903,85 @@ export const tools: readonly ToolDefinition[] = [
     },
   },
   {
+    name: "update_elements",
+    description:
+      "Changes elements that exist in the active project, without deleting and rebuilding them: moves them, turns them, gives them another type and writes their parameters. " +
+      "Each item is { id, moveMm?, rotateDeg?, typeId?, parameters? } and needs at least one of the four. Take id from the elementId of a create_ tool or from get_elements; the id does not change. " +
+      "An id that is a type is refused: to change a type use create_type, load_family or the typeId of the elements. One element appears in one item only, so put everything wanted for it in that item. " +
+      "Within an item the order is the move, the turn, the type and then the parameters, so a parameter written last wins over what a move did to it. " +
+      "MOVE: moveMm is a vector { x, y, z } in millimetres in model coordinates, ADDED to where the element is, so { x: 500, y: 0, z: 0 } moves it 500 along the model's x. z is up. " +
+      "A wall takes no z: Revit accepts a vertical move of a wall without a word and leaves it where it was, so a z other than 0 for a wall is refused, and a wall is raised or lowered with the parameters WALL_BASE_OFFSET and WALL_BASE_CONSTRAINT. " +
+      "It works on what Revit places at a point or along a line: walls, doors, windows and furniture. A wall takes the doors and windows in it along. " +
+      "A wall that is joined to others at its ends keeps those ends on its neighbours: a move across the wall works and its neighbours stretch to follow, but the part of a move that runs along the wall is not applied. " +
+      "Revit accepts that without a word, so the item fails, saying the wall is joined, and the call is rolled back. Walls of a closed contour therefore cannot be shifted one by one along themselves. " +
+      "A door or window stands on the axis of its wall: it moves along the wall and up, and a move across the wall is accepted by Revit with no word and leaves it where it was, so it is refused, saying which way the wall runs. " +
+      "A move along the wall that takes the opening past the end of the wall is judged by Revit only at the commit: the call then comes back with committed false, the item rolled_back and the reason in errors. " +
+      "A floor, a roof, a ceiling or a railing takes its place from a sketch or a path and has no point or line, so it is refused, naming it. A pinned element is refused: a pin is put on purpose, so ask the user before taking it off, which is a call of its own that writes false to the parameter ELEMENT_LOCKED_PARAM (true pins an element), and the move comes after it. " +
+      "ROTATE: rotateDeg is in degrees, counter-clockwise seen from above, and is ADDED to the turn the element has, so turning 90 twice gives 180. Any number is taken, 360 is nothing, and a negative one turns clockwise. " +
+      "The axis is vertical. For an element with a point, such as furniture, it passes through that point, the same turn as rotationDeg of place_instances, so the element stays where it is. " +
+      "For an element along a line, such as a wall, it passes through the middle between the two ends of its axis, and the doors and windows in the wall turn with it. " +
+      "A door, a window or a fixture that hangs on a wall takes its direction from that wall and is refused: turn the wall. " +
+      "TYPE: typeId is the id of a type from list_types or from actual.typeIds of load_family. Revit's ChangeTypeId changes the type in place, so the element keeps its id, and this is how the type of railings that exist is changed (create_railings only reports a railing of another type). " +
+      "Revit is asked first whether the type is valid for the element, and a type that is not is refused with the types that are. A wall given a curtain wall type, or the other way, keeps its id. " +
+      "If Revit does answer with a new element in place of the old one, which its documentation says happens in rare cases, the item fails and the call is rolled back. A member of a group is refused. " +
+      "PARAMETERS: a list of { builtIn, value }. builtIn is the name of Revit's BuiltInParameter, written as its enum writes it and case-sensitive: WALL_USER_HEIGHT_PARAM is the unconnected height of a wall, WALL_BASE_OFFSET its base offset, " +
+      "WALL_BASE_CONSTRAINT its base level, WALL_KEY_REF_PARAM its location line, ALL_MODEL_MARK the mark and ALL_MODEL_INSTANCE_COMMENTS the comments of any element. Localized names are not used. " +
+      "value depends on what the parameter holds. A length is a number of millimetres. Text is a string, Russian included. A whole number is a number without a fraction, and a yes/no parameter takes true or false. " +
+      "A parameter that holds an element, such as a level, takes the id of that element as a string, and the element must exist. " +
+      "A number that is not a length, such as an angle, an area, a volume or a slope, has a unit this tool does not convert, so it is refused naming its spec, and nothing is written as if it were millimetres. " +
+      "The same name twice in one item is refused. A name that is no BuiltInParameter, a parameter the element does not have, a read-only one and a value of the wrong kind are all refused. " +
+      "A parameter of the type of the element, such as the width of a wall type, is not the element's own: it is refused as one the element does not have, because a type is not written here and the write would change every element of that type. Parameters are checked against the element as it is before the call, and written after the type changes. " +
+      "Everything that can be known is checked before anything changes, and the call is refused naming the item and saying what was found. " +
+      "What only Revit can say is found out while it works: after each stage the element is read back from the model and compared with the request, a move by where the element stands, a turn by how it is turned, " +
+      "a type by its type and a parameter by its value. An item that does not hold fails, the error says what Revit did instead, and the whole call is rolled back. " +
+      "actual is { typeId, typeName, pointMm, rotationDeg, startMm, endMm, parameters }, read from the model after the commit. pointMm is { x, y, z } and rotationDeg is from 0 up to, not including, 360, for an element with a point, and null otherwise. " +
+      "startMm and endMm are the ends of the axis of an element along a line, such as a wall, as { x, y, z }, and null otherwise. All are in millimetres in model coordinates. " +
+            "parameters lists every parameter asked for as [{ builtIn, value }], the value as the model holds it and in the units of the request: a length in millimetres, text as text, a yes/no as true or false, an element as its id. " +
+      "Compare it with what you asked for. " +
+      "For this tool the batch rules read so: updated stands where created does, the element is in the model and holds what was asked, and it is the element that was there, so elementId is the id you gave. " +
+      "unchanged means the element held everything the item asked for already: the type was the type, every parameter was at its value, and the move and the turn were nothing. " +
+      "Nothing is done for it, and when every item is unchanged no Undo step is added. Its actual was read before the call began. " +
+      "A rolled_back item has elementId null although the element exists, because the change is what is not in the model. already_existed is not used. " +
+      BATCH_RULES +
+      " Related tools: get_elements, list_types, create_walls, place_hosted, place_instances, create_railings, delete_elements, undo_last_operation, get_view_snapshot, save_project.",
+    inputSchema: {
+      items: z
+        .array(
+          z
+            .strictObject({
+              id: elementId("The id of the element to change, from a create_ tool or from get_elements. A type is refused"),
+              moveMm: z
+                .strictObject({ x: z.number(), y: z.number(), z: z.number() })
+                .optional()
+                .describe("The vector to move the element by, as { x, y, z } in millimetres in model coordinates. It is added to where the element is. z is up."),
+              rotateDeg: z
+                .number()
+                .optional()
+                .describe("The turn to add to the one the element has, in degrees counter-clockwise seen from above, about the vertical through its point, or through the middle of its axis for a wall."),
+              typeId: elementId("The id of the type to give the element, from list_types or actual.typeIds of load_family. The element keeps its id").optional(),
+              parameters: z
+                .array(
+                  z.strictObject({
+                    builtIn: z.string().min(1).describe("The name of a BuiltInParameter, case-sensitive, such as WALL_USER_HEIGHT_PARAM."),
+                    value: z
+                      .union([z.number(), z.string(), z.boolean()])
+                      .describe("The value: a number of millimetres for a length, text for text, a whole number for a whole number (true or false for a yes/no), the id of an element as a string for a parameter that holds an element."),
+                  }),
+                )
+                .min(1)
+                .optional()
+                .describe("The parameters to write, each once."),
+            })
+            .refine((item) => item.moveMm !== undefined || item.rotateDeg !== undefined || item.typeId !== undefined || item.parameters !== undefined, {
+              message: "An item needs at least one of moveMm, rotateDeg, typeId and parameters.",
+            }),
+        )
+        .min(1)
+        .max(MAX_BATCH_ITEMS)
+        .describe(`The items to change, from 1 to ${MAX_BATCH_ITEMS}.`),
+    },
+  },
+  {
     name: "delete_elements",
     description:
       "Deletes elements of the active project by id, or shows what a delete would take. dryRun is true unless you pass false, so a call that leaves it out deletes nothing. " +

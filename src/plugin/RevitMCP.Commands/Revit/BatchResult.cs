@@ -19,9 +19,9 @@ public sealed class BatchResult
     }
 
     /// <summary>
-    /// Builds the command result. When <paramref name="outcome"/> did not commit, every item reported as created is
-    /// reported as rolled back, without the ID and state of an element that no longer exists. All keys are always
-    /// present, and they are camelCase.
+    /// Builds the command result. When <paramref name="outcome"/> did not commit, every item reported as created or updated is
+    /// reported as rolled back, without the ID and state of an element that no longer exists or no longer holds the change. All keys are
+    /// always present, and they are camelCase.
     /// </summary>
     public JsonElement ToJson(OperationOutcome outcome)
     {
@@ -29,7 +29,7 @@ public sealed class BatchResult
 
         var items = outcome.Committed
             ? _items
-            : _items.ConvertAll(item => item.Status == ItemStatus.Created
+            : _items.ConvertAll(item => item.Status is ItemStatus.Created or ItemStatus.Updated
                 ? item with { Status = ItemStatus.RolledBack, ElementId = null, Actual = null }
                 : item);
 

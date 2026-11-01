@@ -51,6 +51,8 @@ const roof = {
   edgeSlopesDeg: [30, null, 30.5, null],
 };
 const attachment = { wallId: "10", roofId: "20" };
+const change = { id: "10", moveMm: { x: 500.5, y: -250, z: 0 } };
+const parameterChange = { id: "10", parameters: [{ builtIn: "WALL_USER_HEIGHT_PARAM", value: 3500.25 }, { builtIn: "ALL_MODEL_MARK", value: "Стена А1" }, { builtIn: "WALL_KEY_REF_PARAM", value: 2 }] };
 const ceiling = { boundaryMm: floor.boundaryMm, typeId: "1", levelId: "2", heightOffsetMm: 2350 };
 const opening = { floorId: "10", boundaryMm: floor.boundaryMm };
 const ground = { boundaryMm: floor.boundaryMm, levelId: "2", topOffsetMm: -400, typeId: "5" };
@@ -111,6 +113,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "place_instances",
         "save_project",
         "undo_last_operation",
+        "update_elements",
       ],
     );
     for (const tool of tools) {
@@ -504,6 +507,30 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["attach_walls", { items: [{ roofId: "20" }] }],
     ["attach_walls", { items: [{ wallId: 10, roofId: "20" }] }],
     ["attach_walls", { items: [{ ...attachment, top: true }] }],
+    ["update_elements", {}],
+    ["update_elements", { items: [] }],
+    ["update_elements", { items: batch(501, change) }],
+    ["update_elements", { items: [{}] }],
+    ["update_elements", { items: [{ id: "10" }] }],
+    ["update_elements", { items: [{ id: "10", parameters: [] }] }],
+    ["update_elements", { items: [{ moveMm: change.moveMm }] }],
+    ["update_elements", { items: [{ ...change, id: 10 }] }],
+    ["update_elements", { items: [{ ...change, id: "" }] }],
+    ["update_elements", { items: [{ id: "10", moveMm: { x: 1, y: 2 } }] }],
+    ["update_elements", { items: [{ id: "10", moveMm: { x: "1", y: 2, z: 3 } }] }],
+    ["update_elements", { items: [{ id: "10", moveMm: { x: 1, y: 2, z: 3, w: 4 } }] }],
+    ["update_elements", { items: [{ id: "10", moveMm: [1, 2, 3] }] }],
+    ["update_elements", { items: [{ id: "10", rotateDeg: "90" }] }],
+    ["update_elements", { items: [{ id: "10", typeId: 7 }] }],
+    ["update_elements", { items: [{ id: "10", typeId: "" }] }],
+    ["update_elements", { items: [{ id: "10", parameters: [{ builtIn: "ALL_MODEL_MARK" }] }] }],
+    ["update_elements", { items: [{ id: "10", parameters: [{ value: "x" }] }] }],
+    ["update_elements", { items: [{ id: "10", parameters: [{ builtIn: "", value: "x" }] }] }],
+    ["update_elements", { items: [{ id: "10", parameters: [{ builtIn: "ALL_MODEL_MARK", value: null }] }] }],
+    ["update_elements", { items: [{ id: "10", parameters: [{ builtIn: "ALL_MODEL_MARK", value: ["x"] }] }] }],
+    ["update_elements", { items: [{ id: "10", parameters: [{ builtIn: "ALL_MODEL_MARK", value: "x", unit: "mm" }] }] }],
+    ["update_elements", { items: [{ id: "10", parameters: { builtIn: "ALL_MODEL_MARK", value: "x" } }] }],
+    ["update_elements", { items: [{ ...change, position: "treads" }] }],
     ["delete_elements", {}],
     ["delete_elements", { ids: [] }],
     ["delete_elements", { ids: [123] }],
@@ -1135,6 +1162,54 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.equal(bridge.frames[0]?.method, "attach_walls");
     assert.deepEqual(bridge.frames[0]?.params, { items: [attachment] });
     assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
+  it("passes updates unchanged, with the units and the Cyrillic of the request", async (t) => {
+    const answer = { committed: true, items: [{ index: 0, status: "updated", elementId: "10" }], warnings: [], errors: [], dialogs: [] };
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
+    const everything = { id: "11", moveMm: { x: 0, y: 0, z: 300 }, rotateDeg: -90.5, typeId: "7", parameters: [{ builtIn: "ALL_MODEL_MARK", value: "Несущая стена" }, { builtIn: "WALL_BASE_CONSTRAINT", value: "311" }] };
+
+    const result = await client.callTool({ name: "update_elements", arguments: { items: [change, parameterChange, everything] } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "update_elements");
+    assert.deepEqual(bridge.frames[0]?.params, { items: [change, parameterChange, everything] });
+    assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
+  it("tells the model the truth about update_elements", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "update_elements")?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    assert.match(description, /500/);
+    for (const word of ["updated", "unchanged", "failed", "rolled_back", "not attempted", "actual"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /needs at least one of the four/);
+    assert.match(description, /the id does not change/);
+    assert.match(description, /ADDED to where the element is/);
+    assert.match(description, /ADDED to the turn the element has/);
+    assert.match(description, /A wall takes the doors and windows in it along/);
+    assert.match(description, /A wall takes no z/);
+    assert.match(description, /WALL_BASE_OFFSET and WALL_BASE_CONSTRAINT/);
+    assert.match(description, /through the middle between the two ends of its axis/);
+    assert.match(description, /A floor, a roof, a ceiling or a railing .* is refused/);
+    assert.match(description, /A pinned element is refused/);
+    assert.match(description, /this is how the type of railings that exist is changed/);
+    assert.match(description, /ChangeTypeId/);
+    assert.match(description, /name of Revit's BuiltInParameter/);
+    assert.match(description, /case-sensitive/);
+    assert.match(description, /A length is a number of millimetres/);
+    assert.match(description, /angle, an area, a volume or a slope/);
+    assert.match(description, /A parameter of the type of the element, such as the width of a wall type, is not the element's own/);
+    assert.match(description, /when every item is unchanged no Undo step is added/);
+    assert.match(description, /elementId null although the element exists/);
+    assert.match(description, /delete_elements/);
+    assert.match(description, /get_elements/);
   });
 
   it("asks delete_elements for a dry run unless told otherwise", async (t) => {
