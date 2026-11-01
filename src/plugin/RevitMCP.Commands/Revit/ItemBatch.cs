@@ -125,7 +125,7 @@ internal static class ItemBatch
     }
 
     /// <summary>The batch has landed by now, so a failure here must not read as a failed call.</summary>
-    private static void ReadBackAll(
+    public static void ReadBackAll(
         Document document,
         ItemResult?[] results,
         Func<Element, object> readBack,

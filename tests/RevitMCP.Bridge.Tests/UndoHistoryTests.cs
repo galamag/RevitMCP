@@ -13,6 +13,7 @@ public class UndoHistoryTests
     private const int Other = 2;
     private const string Ours = "MCP: create_walls";
     private const string Theirs = "Wall";
+    private const string Stairs = "MCP: create_stairs";
 
     private readonly FakeTimeProvider _clock = new();
     private readonly UndoHistory _history;
@@ -717,6 +718,371 @@ public class UndoHistoryTests
     }
 
     [Fact]
+    public void SettleLastAttempt_IsNullBeforeTheFirstPost()
+    {
+        Assert.Null(_history.SettleLastAttempt());
+    }
+
+    [Fact]
+    public void SettleLastAttempt_CallsAnUndoStillWaitingRefused()
+    {
+        Commit(Active, Ours, ["10"]);
+        var posted = Post();
+
+        var settled = _history.SettleLastAttempt()!;
+
+        Assert.Equal(UndoOutcome.Refused, settled.Outcome);
+        Assert.Equal(posted.Id, settled.Id);
+        Assert.Equal(["10"], settled.Step.CreatedIds);
+        Assert.Equal(settled, _history.LastAttempt);
+    }
+
+    [Fact]
+    public void SettleLastAttempt_LeavesAnUndoThatWasConfirmed()
+    {
+        Commit(Active, Ours);
+        Post();
+        _history.Undone(Active, "Дом", [Ours]);
+
+        Assert.Equal(UndoOutcome.Undone, _history.SettleLastAttempt()!.Outcome);
+    }
+
+    [Fact]
+    public void SettleLastAttempt_LeavesAnUndoThatTookSomethingElse()
+    {
+        Commit(Active, Ours);
+        Post();
+        _history.Undone(Active, "Дом", ["Что-то другое"]);
+
+        Assert.Equal(UndoOutcome.Other, _history.SettleLastAttempt()!.Outcome);
+    }
+
+    [Fact]
+    public void SettleLastAttempt_LeavesAnUndoWhoseFateIsUnknown()
+    {
+        Commit(Active, Ours);
+        Post();
+        FailToRecord(Active);
+
+        Assert.Equal(UndoOutcome.Unknown, _history.SettleLastAttempt()!.Outcome);
+    }
+
+    [Fact]
+    public void SettleLastAttempt_AskedAgainGivesTheSameAnswer()
+    {
+        Commit(Active, Ours);
+        Post();
+
+        var first = _history.SettleLastAttempt();
+
+        Assert.Equal(first, _history.SettleLastAttempt());
+    }
+
+    /// <summary>A refused undo changed nothing, so there is nothing to wait for: this ends the one-minute cascade.</summary>
+    [Fact]
+    public void Decide_AllowsTheSameStepAgainAtOnce_AfterARefusal()
+    {
+        Commit(Active, Ours);
+        Post();
+
+        _history.SettleLastAttempt();
+
+        var decision = _history.Decide(Active);
+        Assert.Equal(UndoVerdict.Allowed, decision.Verdict);
+        Assert.Equal(Ours, decision.Step!.Name);
+    }
+
+    [Fact]
+    public void Decide_KeepsRefusing_WhileNothingAskedWhatBecameOfTheUndo()
+    {
+        Commit(Active, Ours);
+        Post();
+
+        Assert.Equal(UndoVerdict.Unconfirmed, _history.Decide(Active).Verdict);
+    }
+
+    [Fact]
+    public void Decide_KeepsRefusingAfterAskingAboutAnUndoWhoseFateIsUnknown()
+    {
+        Commit(Active, Ours);
+        Post();
+        FailToRecord(null);
+        _history.Forget(Other);
+
+        _history.SettleLastAttempt();
+
+        Assert.Equal(UndoVerdict.Unconfirmed, _history.Decide(Other).Verdict);
+    }
+
+    [Fact]
+    public void Posted_AfterARefusal_IsANewAttemptThatCanBeConfirmed()
+    {
+        Commit(Active, Ours);
+        var refused = Post();
+        _history.SettleLastAttempt();
+        var retry = Post();
+
+        var late = _history.Undone(Active, "Дом", [Ours]);
+
+        Assert.Null(late);
+        Assert.NotEqual(refused.Id, retry.Id);
+        Assert.Equal(retry.Id, _history.LastAttempt!.Id);
+        Assert.Equal(UndoOutcome.Undone, _history.LastAttempt.Outcome);
+    }
+
+    [Fact]
+    public void Undone_ByARefusedUndoAfterAll_MakesItUndone_AndReportsItForTheLog()
+    {
+        Commit(Active, Ours);
+        var posted = Post();
+        _history.SettleLastAttempt();
+
+        var late = _history.Undone(Active, "Дом", [Ours]);
+
+        Assert.Equal(posted.Id, late!.Id);
+        Assert.Equal(UndoOutcome.Undone, _history.LastAttempt!.Outcome);
+    }
+
+    [Fact]
+    public void Undone_OfTheRefusedStep_CountsAfterTheWindowToo()
+    {
+        Commit(Active, Ours);
+        Post();
+        _history.SettleLastAttempt();
+        _clock.Advance(UndoHistory.ConfirmWindow * 2);
+
+        Assert.NotNull(_history.Undone(Active, "Дом", [Ours]));
+        Assert.Equal(UndoOutcome.Undone, _history.LastAttempt!.Outcome);
+    }
+
+    /// <summary>The risk of a retry: the refused undo ran after all, so one step more came off than was asked for. Only the log can say so.</summary>
+    [Fact]
+    public void Undone_OfTheStepBelow_RightAfterARetry_IsReportedForTheLog()
+    {
+        Commit(Active, "MCP: first");
+        Commit(Active, "MCP: second");
+        var refused = Post();
+        _history.SettleLastAttempt();
+        var retry = Post();
+        _history.Undone(Active, "Дом", ["MCP: second"]);
+
+        var late = _history.Undone(Active, "Дом", ["MCP: first"]);
+
+        Assert.Equal(refused.Id, late!.Id);
+        Assert.Equal(retry.Id, _history.LastAttempt!.Id);
+        Assert.Equal(UndoOutcome.Undone, _history.LastAttempt.Outcome);
+    }
+
+    [Fact]
+    public void Undone_OfAnotherStepAfterTheWindow_IsNoLongerTiedToARefusal()
+    {
+        Commit(Active, Ours);
+        Post();
+        _history.SettleLastAttempt();
+        Commit(Active, Theirs);
+        _clock.Advance(UndoHistory.ConfirmWindow);
+
+        Assert.Null(_history.Undone(Active, "Дом", [Theirs]));
+    }
+
+    [Fact]
+    public void Undone_ReportsOneRefusalOnce()
+    {
+        Commit(Active, "MCP: first");
+        Commit(Active, "MCP: second");
+        Post();
+        _history.SettleLastAttempt();
+
+        Assert.NotNull(_history.Undone(Active, "Дом", ["MCP: second"]));
+        Assert.Null(_history.Undone(Active, "Дом", ["MCP: first"]));
+    }
+
+    [Fact]
+    public void Undone_WithNothingRefused_ReportsNothingForTheLog()
+    {
+        Commit(Active, "MCP: first");
+        Commit(Active, "MCP: second");
+        Post();
+
+        Assert.Null(_history.Undone(Active, "Дом", ["MCP: second"]));
+        Assert.Null(_history.Undone(Active, "Дом", ["MCP: first"]));
+    }
+
+    /// <summary>Live Revit: a scope reports three commits, the last named in the language of the interface, and undoes them as one step named after the scope.</summary>
+    [Fact]
+    public void Scope_MakesItsCommitsOneStep_NamedAfterIt_WithAllTheirIds()
+    {
+        Commit(Active, Ours);
+
+        RunScope(Active, (Stairs, ["10", "11"]), ($"{Stairs} inner", ["12"]), ("Режим завершения", ["13"]));
+
+        var decision = _history.Decide(Active);
+        Assert.Equal(UndoVerdict.Allowed, decision.Verdict);
+        Assert.Equal(Stairs, decision.Step!.Name);
+        Assert.Equal(["10", "11", "12", "13"], decision.Step.CreatedIds);
+
+        _history.Undone(Active, "Дом", [Stairs]);
+
+        Assert.Equal(Ours, _history.Decide(Active).Step!.Name);
+    }
+
+    [Fact]
+    public void Scope_TakesACommitOfSeveralNames_LikeAnyOther()
+    {
+        _history.BeginScope(Active, Stairs);
+        _history.Committed(Active, "Дом", ["A", "B"], ["10"], []);
+        _history.Committed(Active, "Дом", [], ["11"], []);
+        _history.EndScope(Active);
+
+        var decision = _history.Decide(Active);
+        Assert.Equal(UndoVerdict.Allowed, decision.Verdict);
+        Assert.Equal(["10", "11"], decision.Step!.CreatedIds);
+    }
+
+    [Fact]
+    public void Scope_KeepsNoIdThatCameAndWentInsideIt()
+    {
+        _history.BeginScope(Active, Stairs);
+        Commit(Active, "A", ["10", "11"], ["5"]);
+        Commit(Active, "B", ["12"], ["11", "6"]);
+        _history.EndScope(Active);
+
+        var step = _history.Decide(Active).Step!;
+        Assert.Equal(["10", "12"], step.CreatedIds);
+        Assert.Equal(["5", "6"], step.DeletedIds);
+    }
+
+    [Fact]
+    public void Scope_ThatComesBackByRedo_IsTheSameOneStep()
+    {
+        RunScope(Active, ("A", ["10"]), ("B", ["11"]));
+        _history.Undone(Active, "Дом", [Stairs]);
+
+        _history.Redone(Active, "Дом", [Stairs]);
+
+        var decision = _history.Decide(Active);
+        Assert.Equal(UndoVerdict.Allowed, decision.Verdict);
+        Assert.Equal(["10", "11"], decision.Step!.CreatedIds);
+    }
+
+    /// <summary>Live Revit: a cancelled scope reports one group that names its commits, the last first, and the history holds them as one step.</summary>
+    [Fact]
+    public void Scope_RolledBack_TakesItsStepOff_AndLeavesWhatLayBelow()
+    {
+        Commit(Active, Ours, ["5"]);
+        _history.BeginScope(Active, Stairs);
+        Commit(Active, Stairs, ["10"]);
+        Commit(Active, $"{Stairs} inner", ["11"]);
+
+        _history.RolledBack(Active, "Дом", [$"{Stairs} inner", Stairs]);
+        _history.EndScope(Active);
+
+        var decision = _history.Decide(Active);
+        Assert.Equal(UndoVerdict.Allowed, decision.Verdict);
+        Assert.Equal(Ours, decision.Step!.Name);
+        Assert.Equal(["5"], decision.Step.CreatedIds);
+    }
+
+    [Fact]
+    public void Scope_RolledBack_LeavesNothingToRedo()
+    {
+        _history.BeginScope(Active, Stairs);
+        Commit(Active, Stairs, ["10"]);
+        _history.RolledBack(Active, "Дом", [Stairs]);
+        _history.EndScope(Active);
+
+        _history.Redone(Active, "Дом", [Stairs]);
+
+        Assert.Empty(_history.Decide(Active).Step!.CreatedIds);
+    }
+
+    [Fact]
+    public void Scope_RolledBackBeforeItCommitted_LeavesTheHistoryAlone()
+    {
+        Commit(Active, Ours);
+        _history.BeginScope(Active, Stairs);
+
+        _history.RolledBack(Active, "Дом", [Stairs]);
+        _history.EndScope(Active);
+
+        Assert.Equal(UndoVerdict.Allowed, _history.Decide(Active).Verdict);
+        Assert.Equal(Ours, _history.Decide(Active).Step!.Name);
+    }
+
+    [Fact]
+    public void Scope_ThatCommittedNothing_LeavesNoStep()
+    {
+        Commit(Active, Ours);
+
+        RunScope(Active);
+
+        Assert.Equal(Ours, _history.Decide(Active).Step!.Name);
+    }
+
+    [Fact]
+    public void Scope_CommittingAgainAfterARollback_StartsAStepOfItsOwn()
+    {
+        _history.BeginScope(Active, Stairs);
+        Commit(Active, Stairs, ["10"]);
+        _history.RolledBack(Active, "Дом", [Stairs]);
+        Commit(Active, Stairs, ["20"]);
+        _history.EndScope(Active);
+
+        Assert.Equal(["20"], _history.Decide(Active).Step!.CreatedIds);
+    }
+
+    [Fact]
+    public void Scope_EndsWhatCouldBeRedone()
+    {
+        Commit(Active, Ours);
+        _history.Undone(Active, "Дом", [Ours]);
+
+        RunScope(Active, ("A", ["10"]));
+        _history.Redone(Active, "Дом", [Ours]);
+
+        Assert.Empty(_history.Decide(Active).Step!.CreatedIds);
+    }
+
+    [Fact]
+    public void Scope_Ended_LeavesTheNextCommitAStepOfItsOwn()
+    {
+        RunScope(Active, ("A", ["10"]));
+
+        Commit(Active, Theirs);
+
+        var decision = _history.Decide(Active);
+        Assert.Equal(UndoVerdict.NotOurs, decision.Verdict);
+        Assert.Equal(Stairs, decision.Ours!.Name);
+    }
+
+    [Fact]
+    public void Scope_FoldsItsOwnDocumentOnly()
+    {
+        Commit(Other, "Другое");
+
+        _history.BeginScope(Active, Stairs);
+        Commit(Other, Theirs);
+        _history.EndScope(Active);
+
+        Assert.Equal(Theirs, _history.Decide(Other).Step!.Name);
+    }
+
+    [Fact]
+    public void Scope_OnAFullHistory_KeepsTheDepthAndItsIds()
+    {
+        for (var step = 0; step < UndoHistory.MaxDepth; step++)
+        {
+            Commit(Active, $"MCP: {step}");
+        }
+
+        RunScope(Active, ("A", ["10"]), ("B", ["11"]));
+
+        var decision = _history.Decide(Active);
+        Assert.Equal(Stairs, decision.Step!.Name);
+        Assert.Equal(["10", "11"], decision.Step.CreatedIds);
+    }
+
+    [Fact]
     public void LastAttempt_IsNullBeforeTheFirstPost()
     {
         Commit(Active, Ours);
@@ -824,6 +1190,7 @@ public class UndoHistoryTests
 
         Assert.Contains("get_last_undo_result", text);
         Assert.Contains("one minute", text);
+        Assert.Contains("If Revit refused it", text);
     }
 
     [Fact]
@@ -845,6 +1212,19 @@ public class UndoHistoryTests
 
     private void Commit(int document, string name, string[]? created = null, string[]? deleted = null) =>
         _history.Committed(document, document == Active ? "Дом" : "Другой", [name], created ?? [], deleted ?? []);
+
+    /// <summary>Runs an edit scope that lands, with one commit for each of <paramref name="commits"/>.</summary>
+    private void RunScope(int document, params (string Name, string[] Created)[] commits)
+    {
+        _history.BeginScope(document, Stairs);
+
+        foreach (var (name, created) in commits)
+        {
+            Commit(document, name, created);
+        }
+
+        _history.EndScope(document);
+    }
 
     private UndoAttempt Post() => _history.Posted(_history.Decide(Active).Step!);
 }

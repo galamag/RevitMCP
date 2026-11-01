@@ -58,6 +58,8 @@ const family = { path: "Russia\\Мебель\\Кровати\\Кровать-С�
 const familyRow = { path: "Russia\\Двери\\Дверь-Одинарная-Панель.rfa", typeName: "800 x 2100 мм", widthMm: 800, heightMm: 2100 };
 const instance = { typeId: "7", pointMm: { x: 1000, y: 2000 }, levelId: "2" };
 const hosted = { typeId: "7", wallId: "10", offsetAlongWallMm: 1500, sillHeightMm: 900 };
+const run = { startMm: { x: 0, y: 0 }, endMm: { x: 0, y: 3750 } };
+const stairs = { baseLevelId: "311", topLevelId: "694", typeId: "7", runsMm: [run], widthMm: 1000, desiredRisers: 16 };
 const material = { name: "Краснодарский кирпич", colorRgb: { r: 170, g: 40, b: 35 } };
 const layer = { thicknessMm: 200, materialId: "7", function: "structure" };
 const typeItem = { category: "walls", baseTypeId: "408", name: "Стена 250 мм" };
@@ -83,6 +85,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "create_materials",
         "create_project",
         "create_roof",
+        "create_stairs",
         "create_type",
         "create_walls",
         "delete_elements",
@@ -405,6 +408,30 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["place_hosted", { items: [{ ...hosted, hostWallId: "10" }] }],
     ["place_hosted", { items: [{ ...hosted, pointMm: { x: 1, y: 2 } }] }],
     ["place_hosted", { items: [{ ...hosted, levelId: "2" }] }],
+    ["create_stairs", {}],
+    ["create_stairs", { items: [] }],
+    ["create_stairs", { items: [stairs, stairs] }],
+    ["create_stairs", { items: [{ ...stairs, baseLevelId: undefined }] }],
+    ["create_stairs", { items: [{ ...stairs, baseLevelId: 311 }] }],
+    ["create_stairs", { items: [{ ...stairs, topLevelId: undefined }] }],
+    ["create_stairs", { items: [{ ...stairs, topLevelId: "" }] }],
+    ["create_stairs", { items: [{ ...stairs, typeId: undefined }] }],
+    ["create_stairs", { items: [{ ...stairs, typeId: 7 }] }],
+    ["create_stairs", { items: [{ ...stairs, runsMm: undefined }] }],
+    ["create_stairs", { items: [{ ...stairs, runsMm: [] }] }],
+    ["create_stairs", { items: [{ ...stairs, runsMm: [run, run, run] }] }],
+    ["create_stairs", { items: [{ ...stairs, runsMm: [{ startMm: run.startMm }] }] }],
+    ["create_stairs", { items: [{ ...stairs, runsMm: [{ ...run, endMm: { x: 0, y: 3750, z: 3000 } }] }] }],
+    ["create_stairs", { items: [{ ...stairs, runsMm: [{ ...run, widthMm: 1000 }] }] }],
+    ["create_stairs", { items: [{ ...stairs, widthMm: undefined }] }],
+    ["create_stairs", { items: [{ ...stairs, widthMm: 0 }] }],
+    ["create_stairs", { items: [{ ...stairs, widthMm: -1000 }] }],
+    ["create_stairs", { items: [{ ...stairs, widthMm: "1000" }] }],
+    ["create_stairs", { items: [{ ...stairs, desiredRisers: undefined }] }],
+    ["create_stairs", { items: [{ ...stairs, desiredRisers: 1 }] }],
+    ["create_stairs", { items: [{ ...stairs, desiredRisers: 501 }] }],
+    ["create_stairs", { items: [{ ...stairs, desiredRisers: 15.5 }] }],
+    ["create_stairs", { items: [{ ...stairs, justification: "Left" }] }],
     ["attach_walls", {}],
     ["attach_walls", { items: [] }],
     ["attach_walls", { items: batch(501, attachment) }],
@@ -694,6 +721,52 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     });
   });
 
+  it("passes one staircase with one or two runs as it was given", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+    const twoRuns = { ...stairs, runsMm: [{ startMm: { x: 0.5, y: 0 }, endMm: { x: 0.5, y: 1750 } }, { startMm: { x: 1100.5, y: 1750 }, endMm: { x: 1100.5, y: 0 } }] };
+
+    const result = await client.callTool({ name: "create_stairs", arguments: { items: [stairs] } });
+    const second = await client.callTool({ name: "create_stairs", arguments: { items: [twoRuns] } });
+
+    assert.ok(!result.isError);
+    assert.ok(!second.isError);
+    assert.equal(bridge.frames[0]?.method, "create_stairs");
+    assert.deepEqual(bridge.frames[0]?.params, { items: [stairs] });
+    assert.deepEqual(bridge.frames[1]?.params, { items: [twoRuns] });
+  });
+
+  it("tells the model the truth about create_stairs", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "create_stairs")?.description ?? "";
+
+    assert.match(description, /exactly ONE staircase/);
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    for (const word of ["created", "failed", "rolled_back", "actual", "committed"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /CENTRE LINE/);
+    assert.match(description, /from the bottom up/);
+    assert.match(description, /so no height is given/);
+    assert.match(description, /\(N - 1\) x tread depth long/);
+    assert.match(description, /must add up to desiredRisers/);
+    assert.match(description, /the length needed/);
+    assert.match(description, /fits the run/);
+    assert.match(description, /back beside it for U-shaped stairs, at a corner, or straight on/);
+    assert.match(description, /fail the item and nothing stays/);
+    assert.match(description, /a landing across the whole gap/);
+    assert.match(description, /adds the railings of the stairs by itself/);
+    assert.match(description, /Stairs do not cut floors/);
+    assert.match(description, /actual\.footprintMm as its boundaryMm/);
+    assert.match(description, /topElevationMm/);
+    assert.match(description, /railingIds/);
+    assert.match(description, /list_types with stairs/);
+    assert.match(description, /create_floor_openings/);
+    assert.match(description, /undo_last_operation/);
+  });
+
   it("tells the model the truth about place_hosted", async (t) => {
     const { client } = await connect(t, () => {});
 
@@ -911,6 +984,9 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /open_project/);
     assert.match(description, /get_last_undo_result/);
     assert.match(description, /There is no redo tool/);
+    assert.match(description, /Not undone means Revit refused/);
+    assert.match(description, /you can call this again at once/);
+    assert.doesNotMatch(description, /not confirmed/);
   });
 
   it("tells the model the truth about get_last_undo_result", async (t) => {
@@ -920,9 +996,11 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     const description = listed.find((tool) => tool.name === "get_last_undo_result")?.description ?? "";
 
     assert.match(description, /An empty createdIds does not prove that nothing was created/);
-    for (const state of ["undone", "not_confirmed", "other", "unknown", "none"]) {
+    for (const state of ["undone", "refused", "other", "unknown", "none"]) {
       assert.ok(description.includes(state), `should explain ${state}`);
     }
+    assert.doesNotMatch(description, /not_confirmed/);
+    assert.match(description, /the model did not change, nothing is pending/);
     assert.match(description, /otherName and otherDocumentTitle say what/);
     assert.match(description, /probably still in the model/);
     assert.match(description, /read the model first/);

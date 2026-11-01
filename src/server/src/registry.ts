@@ -46,6 +46,11 @@ const MIN_OUTLINE_POINTS = 3;
 /** A roof slope stays below this, in degrees, which the plugin checks too. */
 const MAX_ROOF_SLOPE_DEG = 90;
 
+/** The limits of one stairs, which the plugin checks too. */
+const MIN_STAIRS_RISERS = 2;
+const MAX_STAIRS_RISERS = 500;
+const MAX_STAIRS_RUNS = 2;
+
 /** The limits of a colour channel and of transparency, which the plugin checks too. */
 const MAX_COLOR_CHANNEL = 255;
 const MAX_TRANSPARENCY = 100;
@@ -737,6 +742,47 @@ export const tools: readonly ToolDefinition[] = [
     },
   },
   {
+    name: "create_stairs",
+    description:
+      "Builds one staircase between two levels of the active project: straight with one run, or with two runs and a landing that Revit makes between them, such as a U-shaped staircase or one with a corner. " +
+      "items holds exactly ONE staircase, unlike the other create_ tools, because Revit builds stairs in an edit mode of their own: send a second staircase in a second call. Take baseLevelId and topLevelId from get_model_info, and typeId from list_types with stairs. " +
+      "runsMm lists the runs from the bottom up. startMm and endMm are the ends of the CENTRE LINE of a run, as { x, y } in millimetres in model coordinates, and a run climbs from startMm to endMm. The heights come from the levels and are worked out here, so no height is given. " +
+      `desiredRisers is the number of risers of the whole staircase, from ${MIN_STAIRS_RISERS} to ${MAX_STAIRS_RISERS}. The height between the levels divided by it is the riser height, so it decides how steep the stairs are. widthMm is the width of each run, in millimetres. ` +
+      "The tread depth comes from the type, and the length of a run decides its risers: a run makes its length divided by the tread depth, rounded, plus 1, so a run of N risers is (N - 1) x tread depth long. 16 risers at a tread depth of 250 take a straight run of 3750. " +
+      "The risers of the runs must add up to desiredRisers, and any split will do: 16 risers at 250 take two runs of 1750 and 1750, or 2250 and 1250. Anything else would leave stairs that stop short of the top level or run past it, which Revit accepts with only a warning, so it is refused before anything changes, and the refusal states the tread depth of the type and the length needed. " +
+      "A length that rounds to the right number is taken, and Revit fits the run to the exact length from its start: 3740 becomes 3750. " +
+      "The second run must go on from the end of the first: back beside it for U-shaped stairs, at a corner, or straight on. For U-shaped stairs of width 1000, start the second run level with the end of the first, with its axis 1100 away from the first, so 100 between them, and run it back. " +
+      "The landing lies behind the end of the first run and is as deep as the runs are wide. Runs that overlap, cross or climb side by side in one direction cannot be joined. Revit decides that only once they exist, so such runs fail the item and nothing stays. " +
+      "Runs far apart are joined all the same, by a landing across the whole gap, so keep them close and read footprintMm. " +
+      "A run narrower than the minimum of the type and a riser above its maximum both land, and warnings says so, so read warnings. " +
+      "Revit adds the railings of the stairs by itself, of its default railing type, so do not make any: their ids are in actual.railingIds. Stairs do not cut floors: make the hole with create_floor_openings on the floor of the upper level, and pass actual.footprintMm as its boundaryMm. Build the stairs first, as the footprint comes from them. " +
+      "The whole call is one Undo step, railings and landing included. Input is checked before anything changes, and a problem refuses the call with an error naming the item and, for a bad id, the valid ones. Nothing is substituted. " +
+      "Otherwise it returns { committed, items, warnings, errors, dialogs }, with one entry in items: { index, status, elementId, requested, actual, warnings, error }. Read committed first: when it is false the model did not change. " +
+      "created means the stairs are in the model. failed means Revit took the stairs and they did not come out as asked, and error says why: everything was cancelled and nothing stays. rolled_back means nothing stays and the reason is in errors. " +
+      "actual is { risers, riserHeightMm, treadDepthMm, topElevationMm, footprintMm, railingIds }, read from the model after the commit. risers counts what was built. topElevationMm is the height where the last run really ends, in millimetres in model coordinates, which must be that of the top level. " +
+      "footprintMm lists the four corners, as { x, y }, of the rectangle that holds all the runs and the landing. elementId is the id of the stairs. The project then has unsaved changes. " +
+      "Related tools: list_types, get_model_info, create_floor_openings, get_elements, undo_last_operation, get_view_snapshot, save_project.",
+    inputSchema: {
+      items: z
+        .array(
+          z.strictObject({
+            baseLevelId: elementId("The id of the level the stairs start on, from get_model_info"),
+            topLevelId: elementId("The id of the level the stairs reach, from get_model_info. It must lie above the base level"),
+            typeId: elementId("The id of a stairs type, from list_types with stairs"),
+            runsMm: z
+              .array(z.strictObject({ startMm: planPoint("The bottom end of the centre line of the run"), endMm: planPoint("The top end of the centre line of the run") }))
+              .min(1)
+              .max(MAX_STAIRS_RUNS)
+              .describe("The runs from the bottom up: one for straight stairs, two for stairs with a landing between them."),
+            widthMm: z.number().positive().describe("The width of each run, in millimetres."),
+            desiredRisers: z.number().int().min(MIN_STAIRS_RISERS).max(MAX_STAIRS_RISERS).describe("The number of risers of the whole staircase. The risers of the runs must add up to it."),
+          }),
+        )
+        .length(1)
+        .describe("Exactly one staircase."),
+    },
+  },
+  {
     name: "attach_walls",
     description:
       "Attaches the tops of walls to a roof, so that each wall follows the underside of the roof. A wall below the roof rises to it, which is what fills the gable ends of a gable roof, " +
@@ -790,7 +836,8 @@ export const tools: readonly ToolDefinition[] = [
       "when the undo history of the project was lost, or recording its changes failed: the refusal says for how long, and asking the user to undo does not help; " +
       "when the last operation of these tools lies in another project: make that one active with open_project first; and when an earlier undo is not settled. " +
       "A failed call can also say that Revit undid something else instead of what was asked: that step is gone, so read the model again before you go on. " +
-      "When the text of a failed call says the undo was posted and not confirmed, or that this is not known, do not call this again blindly, as it would take the next operation: " +
+      "A failed call that starts with Not undone means Revit refused the undo it was given, which it does now and then: the model did not change, and you can call this again at once. " +
+      "When the text of a failed call says it is not known what became of the undo, do not call this again blindly, as it would take the next operation: " +
       "ask get_last_undo_result first. After an undo the project may read as saved or as changed, whichever is true: see isModified in get_model_info. There is no redo tool. " +
       "Related tools: get_last_undo_result, delete_elements, get_model_info.",
     inputSchema: {},
@@ -802,7 +849,7 @@ export const tools: readonly ToolDefinition[] = [
       "Says what became of the last undo posted in this Revit session, without undoing anything. undo_last_operation already asks this itself, so call it only after that tool reported no confirmation, such as after a timeout. " +
       "Returns { state, undoId, transactionName, createdIds, restoredIds, documentTitle, otherName, otherDocumentTitle }. state undone means Revit reported that undo, and the other keys mean what they mean there. " +
       "An empty createdIds does not prove that nothing was created: a step Revit redid after this plugin lost track of it is known by name only, so read the model when it matters. " +
-      "not_confirmed means it was posted and Revit reported nothing, so treat the model as unchanged, and it is possible that Revit dropped the command. " +
+      "refused means Revit had its turn with the undo and reported none, which is how it refuses one: the model did not change, nothing is pending, and undo_last_operation can be called again at once. " +
       "other means that while it waited Revit undid something else: otherName and otherDocumentTitle say what, createdIds and restoredIds are about that if known, and transactionName, what was asked for, is probably still in the model, but this answer is final and a parked undo could still run later, so read the model first. " +
       "unknown means that a change could not be recorded while it waited, so it may have happened: read the model. " +
       "none means no undo was posted since Revit or the plugin last started, and the other keys are then empty. " +

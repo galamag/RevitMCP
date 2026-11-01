@@ -7,13 +7,14 @@ namespace RevitMCP.Commands;
 /// <summary>
 /// Says what became of the last posted Undo. It goes through the queue and not through the socket thread on purpose:
 /// live Revit runs a parked posted command ahead of the next external event, so this request is what lets the Undo run,
-/// and by the time it runs here the event of that Undo has arrived. No Revit call, so it needs no document.
+/// and by the time it runs here the event of that Undo has arrived. So an Undo with no event yet was refused by Revit,
+/// and asking is what settles it, see <see cref="UndoHistory.SettleLastAttempt"/>. No Revit call, so it needs no document.
 /// </summary>
 public sealed class GetLastUndoResultCommand(UndoTracker tracker) : ICommand
 {
     private const string None = "none";
     private const string Undone = "undone";
-    private const string NotConfirmed = "not_confirmed";
+    private const string Refused = "refused";
     private const string Other = "other";
     private const string Unknown = "unknown";
 
@@ -23,7 +24,7 @@ public sealed class GetLastUndoResultCommand(UndoTracker tracker) : ICommand
 
     public JsonElement Execute(CommandContext context, JsonElement parameters)
     {
-        var attempt = tracker.History.LastAttempt;
+        var attempt = tracker.History.SettleLastAttempt();
 
         // With another step gone, the ids of the one asked for still stand, and it is the ids of what went that matter.
         var gone = attempt?.Other ?? attempt?.Step;
@@ -49,6 +50,6 @@ public sealed class GetLastUndoResultCommand(UndoTracker tracker) : ICommand
         UndoOutcome.Undone => Undone,
         UndoOutcome.Other => Other,
         UndoOutcome.Unknown => Unknown,
-        _ => NotConfirmed,
+        _ => Refused,
     };
 }

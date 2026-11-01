@@ -16,6 +16,9 @@ public sealed class UndoTracker
     /// <summary>The documents between DocumentClosing and DocumentClosed, as only the first of the pair has the document.</summary>
     private readonly Dictionary<int, int> _closing = [];
 
+    /// <summary>The tracker of this Revit session. <see cref="EditScopeOperation"/> tells it about a scope from here, as it is static like <see cref="Operation"/>.</summary>
+    internal static UndoTracker? Attached { get; private set; }
+
     internal UndoHistory History { get; } = new(TimeProvider.System);
 
     /// <summary>The key of a document in <see cref="History"/>.</summary>
@@ -30,17 +33,28 @@ public sealed class UndoTracker
         application.DocumentOpened += OnDocumentOpened;
         application.DocumentClosing += OnDocumentClosing;
         application.DocumentClosed += OnDocumentClosed;
+        Attached = this;
     }
 
     public void Detach(ControlledApplication application)
     {
         ArgumentNullException.ThrowIfNull(application);
 
+        Attached = null;
         application.DocumentChanged -= OnDocumentChanged;
         application.DocumentCreated -= OnDocumentCreated;
         application.DocumentOpened -= OnDocumentOpened;
         application.DocumentClosing -= OnDocumentClosing;
         application.DocumentClosed -= OnDocumentClosed;
+    }
+
+    /// <summary>Marks an edit scope around its commits, see <see cref="UndoHistory.BeginScope"/>. Disposing the result ends the mark.</summary>
+    internal IDisposable MarkScope(Document document, string transactionName)
+    {
+        var key = KeyOf(document);
+        History.BeginScope(key, transactionName);
+
+        return new ScopeMark(History, key);
     }
 
     private static List<string> Texts(ICollection<ElementId> ids) => ids.Select(id => id.ToString()).ToList();
@@ -60,7 +74,13 @@ public sealed class UndoTracker
                 break;
 
             case UndoOperation.TransactionUndone:
-                History.Undone(key, title, names);
+                if (History.Undone(key, title, names) is { } refused)
+                {
+                    Log.Error(
+                        $"An undo took '{Log.Clean(string.Join(", ", names))}' after undo {refused.Id} of '{Log.Clean(refused.Step.Name)}' was reported as refused by Revit. "
+                        + "Either a person undid this in Revit, or the refused undo ran after all and the report was wrong.");
+                }
+
                 break;
 
             // What a rolled back group held was committed step by step, so it leaves the history the same way.
@@ -115,5 +135,10 @@ public sealed class UndoTracker
         {
             Log.Error($"The undo tracker failed in {handler}, so its history may be behind Revit's.", e);
         }
+    }
+
+    private sealed class ScopeMark(UndoHistory history, int key) : IDisposable
+    {
+        public void Dispose() => history.EndScope(key);
     }
 }

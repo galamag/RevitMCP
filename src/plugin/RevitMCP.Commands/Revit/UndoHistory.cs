@@ -66,7 +66,7 @@ internal sealed record UndoDecision(UndoVerdict Verdict, UndoStep? Step, UndoSte
     {
         { Verdict: UndoVerdict.Unconfirmed, Step: { } step } =>
             $"an earlier undo of '{step.Name}' in '{step.DocumentTitle}' is not settled, and two must not overlap. Nothing was undone by this call. "
-            + "Ask get_last_undo_result what became of it. Undo is possible again one minute after that undo was posted.",
+            + "Ask get_last_undo_result what became of it. If Revit refused it, undo is possible again at once, and otherwise one minute after that undo was posted.",
         { Verdict: UndoVerdict.OtherDocument, Step: { } step } =>
             $"the last operation of these tools, '{step.Name}', lies in '{step.DocumentTitle}', and the active project is '{activeTitle}'. Undo acts on the active project only. "
             + "Nothing was undone. Use open_project to make that project active first.",
@@ -100,6 +100,13 @@ internal enum UndoOutcome
 
     /// <summary>While it waited, an event could not be recorded, so it may have happened.</summary>
     Unknown,
+
+    /// <summary>
+    /// It was still waiting when <see cref="UndoHistory.SettleLastAttempt"/> asked, and by then Revit had given it its turn,
+    /// so Revit refused it and the model did not change. Live Revit writes that refusal to its journal only, as
+    /// <c>API queue command ID_BUTTON_UNDO cannot be invoked in this context</c>, and raises no event.
+    /// </summary>
+    Refused,
 }
 
 /// <summary>
@@ -111,9 +118,10 @@ internal sealed record UndoAttempt(long Id, UndoStep Step, DateTimeOffset Posted
 /// <summary>
 /// A copy of Revit's undo history, one per open document, because the API cannot read the real one. It is kept from
 /// the document events alone, so it can only be as right as they are: live Revit matched it in every probe, except for
-/// a transaction group, whose steps it reports one by one and then undoes under the name of the group. Where it loses
-/// track it forgets what lay below, in the direction of refusing: a step that says "ours" must never be wrong, since
-/// Undo takes whatever is on top of the real history. No Revit type appears here, so the tests can compile this file.
+/// a transaction group, whose steps it reports one by one and then undoes under the name of the group. An edit scope does
+/// the same, and is told apart by <see cref="BeginScope"/>. Where it loses track it forgets what lay below, in the
+/// direction of refusing: a step that says "ours" must never be wrong, since Undo takes whatever is on top of the real
+/// history. No Revit type appears here, so the tests can compile this file.
 /// All of it runs on the Revit main thread.
 /// </summary>
 internal sealed class UndoHistory(TimeProvider clock)
@@ -122,9 +130,9 @@ internal sealed class UndoHistory(TimeProvider clock)
     public const int MaxDepth = 200;
 
     /// <summary>
-    /// How long an unsettled undo blocks the next one. It stands in for "Revit dropped it", which nothing reports. A
-    /// posted command once waited 28 s, and the next request through the external event always let it run first, so a
-    /// block longer than that is only reached when Revit really dropped the command.
+    /// How long an undo that nothing settled blocks the next one, so that two never overlap. A posted command once
+    /// waited 28 s, and the next request through the external event always let it run first, so
+    /// <see cref="SettleLastAttempt"/> ends the wait for an undo Revit refused long before this does.
     /// </summary>
     public static readonly TimeSpan ConfirmWindow = TimeSpan.FromSeconds(60);
 
@@ -138,6 +146,9 @@ internal sealed class UndoHistory(TimeProvider clock)
 
     private long _sequence;
     private long _attempts;
+
+    /// <summary>The undo settled as refused last, until an undo event may have proved that wrong.</summary>
+    private UndoAttempt? _refused;
 
     /// <summary>The undo posted last in this Revit session, whatever became of it.</summary>
     public UndoAttempt? LastAttempt { get; private set; }
@@ -173,6 +184,12 @@ internal sealed class UndoHistory(TimeProvider clock)
         var history = HistoryOf(document);
         history.Redoable.Clear();
 
+        if (history.Scope is { } scope)
+        {
+            Fold(history, scope, document, title, createdIds, deletedIds);
+            return;
+        }
+
         var name = names.Count == 1 ? names[0] : UndoStep.UnknownName;
         var ours = NewStep(name, document, title, [], []).IsOurs;
         history.Done.Add(NewStep(name, document, title, ours ? createdIds : [], ours ? deletedIds : []));
@@ -180,16 +197,29 @@ internal sealed class UndoHistory(TimeProvider clock)
     }
 
     /// <summary>
+    /// An edit scope opens on <paramref name="document"/>. Revit reports each transaction of a scope as a commit of its
+    /// own, the last one under a name in the language of the interface, and then undoes them all as one step named after
+    /// the scope. So until <see cref="EndScope"/> every commit there is folded into one step called
+    /// <paramref name="name"/>, whatever its own name says, with the ids of all of them.
+    /// </summary>
+    public void BeginScope(int document, string name) => HistoryOf(document).Scope = new OpenScope(name);
+
+    /// <summary>The edit scope on <paramref name="document"/> has closed, committed or not.</summary>
+    public void EndScope(int document) => HistoryOf(document).Scope = null;
+
+    /// <summary>
     /// Steps came off the top by an undo: a posted one or the user's. An undo that took anything but the step an
     /// unsettled attempt was posted for is recorded on that attempt, as saying "not undone" then would be false.
+    /// Returns, for the log, the undo reported as refused when this event may be that undo after all, as then what was
+    /// reported about it was wrong. Nothing tells that apart from an undo by the user.
     /// </summary>
-    public void Undone(int document, string title, IReadOnlyList<string> names)
+    public UndoAttempt? Undone(int document, string title, IReadOnlyList<string> names)
     {
         var taken = TakeOff(document, title, names);
 
         if (LastAttempt is not { Outcome: UndoOutcome.Waiting } attempt)
         {
-            return;
+            return ReviseRefusal(taken);
         }
 
         if (taken?.Any(step => step.Sequence == attempt.Step.Sequence) == true)
@@ -200,10 +230,28 @@ internal sealed class UndoHistory(TimeProvider clock)
         {
             LastAttempt = attempt with { Outcome = UndoOutcome.Other, Other = Describe(document, title, names, taken) };
         }
+
+        return null;
     }
 
-    /// <summary>A transaction group rolled back, which takes its steps off the top and is no undo of anyone.</summary>
-    public void RolledBack(int document, string title, IReadOnlyList<string> names) => TakeOff(document, title, names);
+    /// <summary>
+    /// A transaction group rolled back, which takes its steps off the top and is no undo of anyone. Inside an edit scope
+    /// the group is the scope: it names every commit, the history holds them as one step, and nothing is left to redo.
+    /// </summary>
+    public void RolledBack(int document, string title, IReadOnlyList<string> names)
+    {
+        var history = HistoryOf(document);
+
+        if (history.Scope is not { } scope)
+        {
+            TakeOff(document, title, names);
+        }
+        else if (scope.HasStep)
+        {
+            history.Done.RemoveAt(history.Done.Count - 1);
+            scope.HasStep = false;
+        }
+    }
 
     /// <summary>Steps came back, which only a person can do. A step the history cannot find comes back by name alone.</summary>
     public void Redone(int document, string title, IReadOnlyList<string> names)
@@ -246,7 +294,7 @@ internal sealed class UndoHistory(TimeProvider clock)
             return new UndoDecision(UndoVerdict.TrackingFailed, null);
         }
 
-        if (LastAttempt is { Outcome: not UndoOutcome.Undone } attempt && IsWithinWindow(attempt))
+        if (LastAttempt is { Outcome: not (UndoOutcome.Undone or UndoOutcome.Refused) } attempt && IsWithinWindow(attempt))
         {
             return new UndoDecision(UndoVerdict.Unconfirmed, attempt.Step);
         }
@@ -288,6 +336,22 @@ internal sealed class UndoHistory(TimeProvider clock)
     }
 
     /// <summary>
+    /// Returns the last attempt, when a request of its own asks what became of it. Live Revit gives a posted command its
+    /// turn before the next request, so the event of an undo that ran has arrived by now, as it had on the first ask in
+    /// all of 165 undos, and an attempt still waiting was refused. <see cref="Undone"/> corrects that if it was not.
+    /// </summary>
+    public UndoAttempt? SettleLastAttempt()
+    {
+        if (LastAttempt is { Outcome: UndoOutcome.Waiting } attempt)
+        {
+            LastAttempt = attempt with { Outcome = UndoOutcome.Refused };
+            _refused = LastAttempt;
+        }
+
+        return LastAttempt;
+    }
+
+    /// <summary>
     /// Takes as many steps as there are <paramref name="names"/> off <paramref name="stack"/>, nearest first. Returns
     /// null, with <paramref name="stack"/> as it was, when they are not the steps the event names, in any order: the API
     /// does not say in which order several names come.
@@ -317,6 +381,56 @@ internal sealed class UndoHistory(TimeProvider clock)
         0,
         taken?.SelectMany(step => step.CreatedIds).ToList() ?? [],
         taken?.SelectMany(step => step.DeletedIds).ToList() ?? []);
+
+    /// <summary>
+    /// Adds one commit of an edit scope to its step, which is on top, as nothing else can land during one command. An
+    /// element that came and went inside the scope is no change at all.
+    /// </summary>
+    private void Fold(Document history, OpenScope scope, int document, string title, IReadOnlyList<string> createdIds, IReadOnlyList<string> deletedIds)
+    {
+        if (!scope.HasStep)
+        {
+            history.Done.Add(NewStep(scope.Name, document, title, createdIds, deletedIds));
+            scope.HasStep = true;
+            Trim(history, document, title);
+            return;
+        }
+
+        var step = history.Done[^1];
+
+        history.Done[^1] = step with
+        {
+            CreatedIds = [.. step.CreatedIds.Except(deletedIds), .. createdIds],
+            DeletedIds = [.. step.DeletedIds, .. deletedIds.Except(step.CreatedIds)],
+        };
+    }
+
+    /// <summary>
+    /// Judges an undo that came with nothing waiting against the last refusal. One that took the refused step ran after
+    /// all, however late. One that took another step counts inside the window: it may be the second of two, after a retry.
+    /// </summary>
+    private UndoAttempt? ReviseRefusal(List<UndoStep>? taken)
+    {
+        if (_refused is not { } refused)
+        {
+            return null;
+        }
+
+        var tookItsStep = taken?.Any(step => step.Sequence == refused.Step.Sequence) == true;
+
+        if (!tookItsStep && !IsWithinWindow(refused))
+        {
+            return null;
+        }
+
+        if (tookItsStep && LastAttempt?.Id == refused.Id)
+        {
+            LastAttempt = refused with { Outcome = UndoOutcome.Undone };
+        }
+
+        _refused = null;
+        return refused;
+    }
 
     /// <summary>Returns what came off, or null, when the event does not fit the history, which then stops at an unknown step.</summary>
     private List<UndoStep>? TakeOff(int document, string title, IReadOnlyList<string> names)
@@ -391,5 +505,16 @@ internal sealed class UndoHistory(TimeProvider clock)
         public List<UndoStep> Redoable { get; } = [];
 
         public bool Lost { get; set; }
+
+        /// <summary>The edit scope open on this document, if any.</summary>
+        public OpenScope? Scope { get; set; }
+    }
+
+    /// <summary>An edit scope that is open. <see cref="HasStep"/> says the top of the history holds what it has committed so far.</summary>
+    private sealed class OpenScope(string name)
+    {
+        public string Name { get; } = name;
+
+        public bool HasStep { get; set; }
     }
 }

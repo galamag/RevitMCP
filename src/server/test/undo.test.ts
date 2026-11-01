@@ -12,6 +12,7 @@ import { createServer } from "../src/server.ts";
 import { UndoNotConfirmedError, undoLastOperation } from "../src/undo.ts";
 import { FakeBridge } from "./fakeBridge.ts";
 import type { FrameHandler } from "./fakeBridge.ts";
+import { undoWithOneRetry } from "./undoRetry.ts";
 
 const posted = { undoId: 7, transactionName: "MCP: create_walls", createdIds: ["10"], restoredIds: [], documentTitle: "Дом" };
 const undone = { state: "undone", ...posted };
@@ -87,15 +88,28 @@ describe("undo_last_operation", { timeout: 20_000 }, () => {
     assert.equal(bridge.frames.length, 1);
   });
 
-  it("says not undone when Revit did not report the undo", async (t) => {
+  it("says Revit refused, that the model did not change, and that it can be tried again", async (t) => {
+    const { bridge, client } = await connect(t, afterPost((frame, connection) => connection.result(frame, { ...undone, state: "refused" })));
+
+    const result = await undo(client);
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /^Not undone: Revit refused/);
+    assert.match(textOf(result), /MCP: create_walls/);
+    assert.match(textOf(result), /the model did not change/);
+    assert.match(textOf(result), /can be called again at once/);
+    assert.doesNotMatch(textOf(result), /holding|a minute/);
+    assert.deepEqual(bridge.frames.map((frame) => frame.method), ["undo_last_operation", "get_last_undo_result"]);
+  });
+
+  it("takes a state from before the refusal for one it has not heard of", async (t) => {
     const { client } = await connect(t, afterPost((frame, connection) => connection.result(frame, { ...undone, state: "not_confirmed" })));
 
     const result = await undo(client);
 
     assert.equal(result.isError, true);
-    assert.match(textOf(result), /^Not undone: /);
-    assert.match(textOf(result), /MCP: create_walls/);
-    assert.match(textOf(result), /treat the model as unchanged/);
+    assert.match(textOf(result), /not known whether it happened/);
+    assert.doesNotMatch(textOf(result), /Not undone/);
   });
 
   it("never claims success after a plugin restart, and says that is what happened", async (t) => {
@@ -336,7 +350,7 @@ describe("undo_last_operation", { timeout: 20_000 }, () => {
       } else if (frame.method === "undo_last_operation") {
         connection.result(frame, posted);
       } else {
-        connection.result(frame, { ...undone, state: "not_confirmed" });
+        connection.result(frame, { ...undone, state: "refused" });
       }
     });
 
@@ -352,6 +366,48 @@ describe("undo_last_operation", { timeout: 20_000 }, () => {
 
     await assert.rejects(undoLastOperation(bridgeClient), RevitNotRunningError);
     assert.equal(bridge.frames.length, 0);
+  });
+});
+
+describe("undoWithOneRetry, the undo of the live tests", { timeout: 20_000 }, () => {
+  /** A bridge that answers each confirmation with the next of `states`, and a list of what the retry wrote to the test. */
+  async function retryAgainst(t: TestContext, states: string[]) {
+    const left = [...states];
+    const notes: string[] = [];
+    const { bridge, bridgeClient } = await connect(t, afterPost((frame, connection) => connection.result(frame, { ...undone, state: left.shift() })));
+
+    return { bridge, notes, run: () => undoWithOneRetry({ diagnostic: (message) => notes.push(message) }, bridgeClient) };
+  }
+
+  it("needs no retry for an undo that lands", async (t) => {
+    const { bridge, notes, run } = await retryAgainst(t, ["undone"]);
+
+    assert.equal((await run()).state, "undone");
+    assert.equal(bridge.frames.length, 2);
+    assert.deepEqual(notes, []);
+  });
+
+  it("posts a refused undo once more, at once, and writes that to the test", async (t) => {
+    const { bridge, notes, run } = await retryAgainst(t, ["refused", "undone"]);
+
+    assert.equal((await run()).state, "undone");
+    assert.deepEqual(bridge.frames.map((frame) => frame.method), ["undo_last_operation", "get_last_undo_result", "undo_last_operation", "get_last_undo_result"]);
+    assert.equal(notes.length, 1);
+    assert.match(notes[0] ?? "", /Revit refused/);
+  });
+
+  it("gives up after the second refusal", async (t) => {
+    const { bridge, run } = await retryAgainst(t, ["refused", "refused"]);
+
+    await assert.rejects(run(), /^UndoNotConfirmedError: Not undone/);
+    assert.equal(bridge.frames.length, 4);
+  });
+
+  it("does not post again when it is not known what became of the undo", async (t) => {
+    const { bridge, run } = await retryAgainst(t, ["unknown"]);
+
+    await assert.rejects(run(), /not known whether it happened/);
+    assert.equal(bridge.frames.length, 2);
   });
 });
 

@@ -79,10 +79,9 @@ export async function undoLastOperation(client: BridgeCaller, timeoutMs?: number
   switch (result.state) {
     case "undone":
       return result;
-    case "not_confirmed":
+    case "refused":
       throw new UndoNotConfirmedError(
-        `Not undone: Revit did not report the undo of '${posted.transactionName}' that was posted to it, so treat the model as unchanged. Revit may be holding the command, or it may have dropped it. ` +
-          "Call get_last_undo_result to look again. Until a minute has passed since the post, undo_last_operation refuses, so that two undos never overlap.",
+        `Not undone: Revit refused the undo of '${posted.transactionName}' that was posted to it, so the model did not change. Nothing is pending, so undo_last_operation can be called again at once to retry.`,
       );
     case "other":
       throw new UndoNotConfirmedError(describeOther(result, posted));

@@ -32,6 +32,11 @@ public sealed class UndoLastOperationCommand(UndoTracker tracker) : ICommand
         var undo = RevitCommandId.LookupPostableCommandId(PostableCommand.Undo)
             ?? throw new RequestFailedException(JsonRpcCodes.InternalError, $"{Method}: Revit names no Undo command, so nothing was posted.");
 
+        // Why Revit now and then refuses a posted Undo is not known, and its journal cannot say. This line is what the next refusal gets compared with.
+        Log.Info(
+            $"Posting Undo: document '{Log.Clean(active.Title)}', active view '{Log.Clean(active.ActiveView?.Name ?? "none")}' ({active.ActiveView?.ViewType}), "
+            + $"{context.UiApp.Application.Documents.Size} open documents, CanPostCommand {context.UiApp.CanPostCommand(undo)}, top step '{Log.Clean(step.Name)}'.");
+
         // Not recorded before this returns, so a post Revit refuses leaves no attempt to wait for.
         context.UiApp.PostCommand(undo);
         var attempt = tracker.History.Posted(step);

@@ -26,6 +26,7 @@
     "load_family",
     "place_instances",
     "place_hosted",
+    "create_stairs",
     "attach_walls",
     "delete_elements",
     "undo_last_operation",
