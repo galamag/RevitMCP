@@ -27,9 +27,13 @@ export function isInsideFolder(file: string, folder: string): boolean {
   return normalize(file).startsWith(root + "\\");
 }
 
+/** A project template file. A document on one is what a `save_project_template` that failed to save back leaves behind. */
+const TEMPLATE_EXTENSION = /\.rte$/i;
+
 /**
- * Decides from `openDocuments` alone whether Revit may be closed: every document must be saved (`isModified` false)
- * and live inside `folder`. An empty list passes. Anything that does not look as expected is refused.
+ * Decides from `openDocuments` alone whether Revit may be closed: every document must be saved (`isModified` false),
+ * live inside `folder` and not be on a project template file. An empty list passes. Anything that does not look as
+ * expected is refused.
  */
 export function checkCanClose(openDocuments: unknown, folder: string = defaultTestFolder()): CloseVerdict {
   if (!Array.isArray(openDocuments)) {
@@ -46,8 +50,15 @@ export function checkCanClose(openDocuments: unknown, folder: string = defaultTe
     }
     if (typeof document.path !== "string" || document.path.length === 0) {
       reasons.push(`Document "${title}" is not saved to a file.`);
-    } else if (!isInsideFolder(document.path, folder)) {
-      reasons.push(`Document "${title}" is outside ${folder}: ${document.path}`);
+    } else {
+      if (!isInsideFolder(document.path, folder)) {
+        reasons.push(`Document "${title}" is outside ${folder}: ${document.path}`);
+      }
+      if (TEMPLATE_EXTENSION.test(document.path)) {
+        reasons.push(
+          `Document "${title}" is on a project template file, ${document.path}: a save_project_template could not save it back to its project. Save it over the project .rvt in Revit, or close it, before Revit is closed.`,
+        );
+      }
     }
   }
 

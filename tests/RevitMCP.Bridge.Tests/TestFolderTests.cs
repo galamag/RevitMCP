@@ -232,4 +232,143 @@ public class TestFolderTests
 
         Assert.Equal(Path.Combine(profile, "Documents", "RevitMCP"), TestFolder.Root, ignoreCase: true);
     }
+
+    private static void AssertTemplateRefused(string name)
+    {
+        var refusal = Assert.Throws<RequestFailedException>(() => TestFolder.ResolveTemplate(name));
+
+        Assert.Equal(JsonRpcCodes.InvalidParams, refusal.Code);
+    }
+
+    [Theory]
+    [InlineData(@"..\x")]
+    [InlineData("../x")]
+    [InlineData("..")]
+    [InlineData("...")]
+    [InlineData(@"a\..\..\x")]
+    [InlineData("a..b")]
+    [InlineData(@"C:\Windows\x")]
+    [InlineData(@"\\server\share\x")]
+    [InlineData(@"\x")]
+    [InlineData("/etc/x")]
+    [InlineData(@"Z:\x.rte")]
+    [InlineData("Z:x")]
+    public void ResolveTemplate_RejectsTraversal(string name) => AssertTemplateRefused(name);
+
+    [Fact]
+    public void ResolveTemplate_RejectsAbsolutePathInsideTheFolder() =>
+        AssertTemplateRefused(Path.Combine(TestFolder.Root, "x.rte"));
+
+    [Theory]
+    [InlineData("дом")]
+    [InlineData("Тест проба")]
+    [InlineData("проверка-шаблон-120000")]
+    [InlineData("Ёлка_й")]
+    public void ResolveTemplate_AcceptsCyrillicName(string name)
+    {
+        var path = TestFolder.ResolveTemplate(name);
+
+        Assert.Equal(Path.Combine(TestFolder.Root, name + ".rte"), path);
+        Assert.True(TestFolder.Contains(path));
+    }
+
+    [Theory]
+    [InlineData("дом.rte")]
+    [InlineData("дом.RTE")]
+    [InlineData("дом.Rte")]
+    public void ResolveTemplate_SuppliedRteExtensionIsNotDoubled(string name) =>
+        Assert.Equal(Path.Combine(TestFolder.Root, "дом.rte"), TestFolder.ResolveTemplate(name));
+
+    [Theory]
+    [InlineData("дом.rvt")]
+    [InlineData("дом.RVT")]
+    [InlineData("дом.rfa")]
+    [InlineData("дом.txt")]
+    [InlineData("дом.rte.rte")]
+    [InlineData("дом.rvt.rte")]
+    [InlineData("дом.0001")]
+    [InlineData("дом.0001.rte")]
+    [InlineData(".rte")]
+    public void ResolveTemplate_RejectsRvt(string name) => AssertTemplateRefused(name);
+
+    [Fact]
+    public void ResolveTemplate_AndResolve_NeverShareAFile()
+    {
+        var project = TestFolder.Resolve("дом");
+        var template = TestFolder.ResolveTemplate("дом");
+
+        Assert.NotEqual(project, template, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(Path.GetDirectoryName(project), Path.GetDirectoryName(template));
+        AssertRefused("дом.rte");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    public void ResolveTemplate_RejectsEmptyName(string name) => AssertTemplateRefused(name);
+
+    [Fact]
+    public void ResolveTemplate_RejectsNullName() => AssertTemplateRefused(null!);
+
+    [Theory]
+    [InlineData("CON")]
+    [InlineData("con")]
+    [InlineData("PRN")]
+    [InlineData("AUX")]
+    [InlineData("NUL")]
+    [InlineData("COM1")]
+    [InlineData("lpt9")]
+    [InlineData("COM¹")]
+    [InlineData("CONIN$")]
+    [InlineData("CONOUT$")]
+    [InlineData("NUL.rte")]
+    [InlineData("NUL .rte")]
+    [InlineData("com1   .rte")]
+    public void ResolveTemplate_RejectsDeviceName(string name) => AssertTemplateRefused(name);
+
+    [Theory]
+    [InlineData("CONSOLE")]
+    [InlineData("COM")]
+    [InlineData("LPT10")]
+    public void ResolveTemplate_AcceptsNameThatOnlyLooksLikeADevice(string name) =>
+        Assert.Equal(Path.Combine(TestFolder.Root, name + ".rte"), TestFolder.ResolveTemplate(name));
+
+    [Theory]
+    [InlineData("дом.")]
+    [InlineData("дом ")]
+    [InlineData(" дом")]
+    [InlineData("дом .rte")]
+    [InlineData("дом..rte")]
+    public void ResolveTemplate_RejectsDotOrSpaceWindowsWouldDrop(string name) => AssertTemplateRefused(name);
+
+    [Theory]
+    [InlineData("a:b")]
+    [InlineData("a*b")]
+    [InlineData("a?b")]
+    [InlineData("a\"b")]
+    [InlineData("a<b")]
+    [InlineData("a>b")]
+    [InlineData("a|b")]
+    [InlineData("a\0b")]
+    [InlineData("a\nb")]
+    public void ResolveTemplate_RejectsCharactersWindowsForbids(string name) => AssertTemplateRefused(name);
+
+    [Fact]
+    public void ResolveTemplate_KeepsTheSameLengthLimitAsResolve()
+    {
+        Assert.Equal(LongestPath, TestFolder.ResolveTemplate(NameOfPathLength(LongestPath)).Length);
+
+        AssertTemplateRefused(NameOfPathLength(LongestPath + 1));
+        AssertTemplateRefused(new string('я', 1000));
+    }
+
+    [Fact]
+    public void ResolveTemplate_Refusal_NamesTheInputAndSaysTemplate()
+    {
+        var refusal = Assert.Throws<RequestFailedException>(() => TestFolder.ResolveTemplate(@"..\x"));
+
+        Assert.Contains(@"..\x", refusal.Message);
+        Assert.Contains("template", refusal.Message);
+    }
 }

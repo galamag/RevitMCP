@@ -1,13 +1,15 @@
 namespace RevitMCP.Bridge;
 
 /// <summary>
-/// The only folder the project tools may touch, <c>%USERPROFILE%\Documents\RevitMCP</c>. A client names a project, never
-/// a path. Names Windows would quietly rewrite are refused, because the file on disk would then not be the one the
-/// checks here looked at.
+/// The only folder the project tools may touch, <c>%USERPROFILE%\Documents\RevitMCP</c>. A client names a project or a
+/// project template, never a path. Names Windows would quietly rewrite are refused, because the file on disk would then
+/// not be the one the checks here looked at.
 /// </summary>
 public static class TestFolder
 {
-    private const string Extension = ".rvt";
+    private const string ProjectExtension = ".rvt";
+
+    private const string TemplateExtension = ".rte";
 
     /// <summary>
     /// Measured in live Revit: <c>SaveAs</c> takes 259 characters, but <c>Save</c> needs a backup path, five longer
@@ -27,20 +29,30 @@ public static class TestFolder
     /// backup such as <c>name.0001.rvt</c>. Cyrillic is kept exactly as given.
     /// </summary>
     /// <exception cref="RequestFailedException">With <see cref="JsonRpcCodes.InvalidParams"/>, when the name is refused.</exception>
-    public static string Resolve(string name)
+    public static string Resolve(string name) => ResolveFile(name, ProjectExtension, "project");
+
+    /// <summary>
+    /// Returns the full path of the project template called <paramref name="name"/>, which may end in <c>.rte</c> in any
+    /// case. The rules are those of <see cref="Resolve"/> with <c>.rte</c> for <c>.rvt</c>, so a <c>.rvt</c> name is refused
+    /// as the other extension it is. A template and a project of the same name are two files side by side.
+    /// </summary>
+    /// <exception cref="RequestFailedException">With <see cref="JsonRpcCodes.InvalidParams"/>, when the name is refused.</exception>
+    public static string ResolveTemplate(string name) => ResolveFile(name, TemplateExtension, "template");
+
+    private static string ResolveFile(string name, string extension, string kind)
     {
-        var stem = name?.EndsWith(Extension, StringComparison.OrdinalIgnoreCase) == true ? name[..^Extension.Length] : name;
-        var path = Path.Combine(Root, stem + Extension);
+        var stem = name?.EndsWith(extension, StringComparison.OrdinalIgnoreCase) == true ? name[..^extension.Length] : name;
+        var path = Path.Combine(Root, stem + extension);
 
         var problem = FindProblem(stem)
-            ?? (stem!.Contains('.') ? $"apart from an optional {Extension} ending it may hold no dot" : null)
+            ?? (stem!.Contains('.') ? $"apart from an optional {extension} ending it may hold no dot" : null)
             ?? (path.Length > MaxPathLength
-                ? $"it is too long, as Revit can only keep paths of up to {MaxPathLength} characters, so in {Root} a name can have at most {MaxPathLength - Path.Combine(Root, Extension).Length} characters"
+                ? $"it is too long, as Revit can only keep paths of up to {MaxPathLength} characters, so in {Root} a name can have at most {MaxPathLength - Path.Combine(Root, extension).Length} characters"
                 : null);
 
         return problem is null
             ? path
-            : throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"'{name}' cannot be a project name: {problem}.");
+            : throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"'{name}' cannot be a {kind} name: {problem}.");
     }
 
     /// <summary>

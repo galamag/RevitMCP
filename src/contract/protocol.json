@@ -8,6 +8,7 @@
     "create_project",
     "open_project",
     "save_project",
+    "save_project_template",
     "list_types",
     "list_materials",
     "get_elements",

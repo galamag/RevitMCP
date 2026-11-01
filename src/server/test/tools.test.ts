@@ -112,6 +112,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "place_hosted",
         "place_instances",
         "save_project",
+        "save_project_template",
         "undo_last_operation",
         "update_elements",
       ],
@@ -202,6 +203,60 @@ describe("MCP tools", { timeout: 20_000 }, () => {
 
     assert.deepEqual(bridge.frames[0]?.params, {});
     assert.deepEqual(bridge.frames[1]?.params, { name: "дом" });
+  });
+
+  it("passes templateName of create_project on, and leaves it out when it is not given", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { dialogs: [] }));
+
+    await client.callTool({ name: "create_project", arguments: { name: "дом", templateName: "Мой шаблон" } });
+    await client.callTool({ name: "create_project", arguments: { name: "дом" } });
+
+    assert.deepEqual(bridge.frames[0]?.params, { name: "дом", templateName: "Мой шаблон" });
+    assert.deepEqual(bridge.frames[1]?.params, { name: "дом" });
+  });
+
+  it("rejects an empty templateName of create_project before it reaches Revit", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, {}));
+
+    const result = await client.callTool({ name: "create_project", arguments: { name: "дом", templateName: "" } }).catch((error: unknown) => error);
+
+    const failed = result instanceof Error || (result as { isError?: boolean }).isError === true;
+    assert.ok(failed);
+    assert.equal(bridge.frames.length, 0);
+  });
+
+  it("passes a Cyrillic template name of save_project_template to Revit unchanged", async (t) => {
+    const name = "Шаблон коттедж";
+    const { bridge, client } = await connect(t, (frame, connection) =>
+      connection.result(frame, { name: "дом", path: "C:\\Папка\\дом.rvt", templatePath: `C:\\Папка\\${String(frame.params["name"])}.rte`, dialogs: [] }),
+    );
+
+    const result = await client.callTool({ name: "save_project_template", arguments: { name } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "save_project_template");
+    assert.deepEqual(bridge.frames[0]?.params, { name });
+    assert.equal(JSON.parse(textOf(result)).templatePath, `C:\\Папка\\${name}.rte`);
+  });
+
+  it("rejects save_project_template without a name before it reaches Revit", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, {}));
+
+    const result = await client.callTool({ name: "save_project_template", arguments: {} }).catch((error: unknown) => error);
+
+    const failed = result instanceof Error || (result as { isError?: boolean }).isError === true;
+    assert.ok(failed);
+    assert.equal(bridge.frames.length, 0);
+  });
+
+  it("tells the model that a template takes the whole model and that nothing is overwritten", () => {
+    const description = tools.find((tool) => tool.name === "save_project_template")?.description ?? "";
+
+    assert.match(description, /whole model|everything/);
+    assert.match(description, /house/);
+    assert.match(description, /overwrit/);
+    assert.match(description, /create_project/);
+    assert.match(description, /unsaved/);
   });
 
   it("passes a list_types category and returns Cyrillic names intact", async (t) => {

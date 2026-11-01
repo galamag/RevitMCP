@@ -10,6 +10,7 @@ public static class MethodNames
     public const string CreateProject = "create_project";
     public const string OpenProject = "open_project";
     public const string SaveProject = "save_project";
+    public const string SaveProjectTemplate = "save_project_template";
     public const string ListTypes = "list_types";
     public const string ListMaterials = "list_materials";
     public const string GetElements = "get_elements";
@@ -48,6 +49,7 @@ public static class MethodNames
         CreateProject,
         OpenProject,
         SaveProject,
+        SaveProjectTemplate,
         ListTypes,
         ListMaterials,
         GetElements,

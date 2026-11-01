@@ -15,13 +15,14 @@ internal static class ProjectSupport
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
 
     /// <summary>
-    /// Reads the required <c>name</c> parameter, without judging it. The caller judges it: the project commands pass it to
-    /// <see cref="TestFolder.Resolve"/>, and <c>create_3d_view</c> checks it as a view name.
+    /// Reads the required <c>name</c> parameter, or another text parameter named by <paramref name="key"/>, without judging
+    /// it. The caller judges it: the project commands pass it to <see cref="TestFolder.Resolve"/> or
+    /// <see cref="TestFolder.ResolveTemplate"/>, and <c>create_3d_view</c> checks it as a view name.
     /// </summary>
-    public static string ReadName(JsonElement parameters, string method) =>
-        parameters.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String
+    public static string ReadName(JsonElement parameters, string method, string key = "name") =>
+        parameters.TryGetProperty(key, out var name) && name.ValueKind == JsonValueKind.String
             ? name.GetString()!
-            : throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"{method} needs a text name.");
+            : throw new RequestFailedException(JsonRpcCodes.InvalidParams, $"{method} needs a text {key}.");
 
     /// <summary>
     /// Runs the Revit calls of a command and builds its result. <paramref name="describe"/> gets the dialogs, for the

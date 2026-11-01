@@ -34,6 +34,7 @@ public sealed class CommandRegistry
         new CreateProjectCommand(),
         new OpenProjectCommand(),
         new SaveProjectCommand(),
+        new SaveProjectTemplateCommand(),
         new ListTypesCommand(),
         new ListMaterialsCommand(),
         new GetElementsCommand(),

@@ -75,6 +75,13 @@ const projectName = z
     "A bare file name in the test folder, not a path: no folders, no drive, and no dots apart from an optional .rvt ending. The full path may be at most 254 characters, and a refusal states the longest name that fits. Russian names are fine and stay exactly as written.",
   );
 
+const templateName = z
+  .string()
+  .min(1)
+  .describe(
+    "A bare file name of a project template in the test folder, not a path: no folders, no drive, and no dots apart from an optional .rte ending. The full path may be at most 254 characters. Russian names are fine and stay exactly as written.",
+  );
+
 const modelPoint = (what: string) =>
   z
     .object({ x: z.number(), y: z.number(), z: z.number() })
@@ -157,13 +164,18 @@ export const tools: readonly ToolDefinition[] = [
   {
     name: "create_project",
     description:
-      "Creates a new Revit project from the default Russian template, saves it as <name>.rvt in the test folder " +
-      "(%USERPROFILE%\\Documents\\RevitMCP) and makes it the active document. Projects already open stay open. Only " +
+      "Creates a new Revit project from the default Russian template, or from a template of your own when templateName is given, " +
+      "saves it as <name>.rvt in the test folder (%USERPROFILE%\\Documents\\RevitMCP) and makes it the active document. Projects already open stay open. Only " +
       "the test folder is reachable, so pass a name and never a path. It overwrites nothing: a name already in the " +
-      "folder is refused, and then open_project is what you want. Returns { name, path, dialogs }: path is where the " +
+      "folder is refused, and then open_project is what you want. " +
+      "templateName is the name of a template that save_project_template made, such as one that holds your own wall types and materials. " +
+      "A template that does not exist is refused before anything is opened, and so is one that Revit holds open as a document. " +
+      "A template carries the whole model it was saved from, so a project made from a template saved from a built house starts with that house in it. " +
+      "Leave templateName out for the stock template. " +
+      "Returns { name, path, dialogs }: path is where the " +
       "file really went, and dialogs ([{ dialogId, message }]) lists the Revit dialogs that came up and were refused, " +
-      "usually none. Takes several seconds. Related tools: open_project, save_project, get_model_info.",
-    inputSchema: { name: projectName },
+      "usually none. Takes several seconds. Related tools: save_project_template, open_project, save_project, get_model_info.",
+    inputSchema: { name: projectName, templateName: templateName.optional() },
   },
   {
     name: "open_project",
@@ -186,8 +198,26 @@ export const tools: readonly ToolDefinition[] = [
       "you should call open_project first. Without name it saves whatever is active. Revit keeps numbered backups " +
       "such as <name>.0001.rvt beside the file. Returns { name, path, dialogs }: dialogs ([{ dialogId, message }]) " +
       "lists the Revit dialogs that came up and were refused, usually none. Related tools: create_project, " +
-      "open_project, get_model_info.",
+      "save_project_template, open_project, get_model_info.",
     inputSchema: { name: projectName.optional() },
+  },
+  {
+    name: "save_project_template",
+    description:
+      "Saves the active project as a project template, <name>.rte in the test folder (%USERPROFILE%\\Documents\\RevitMCP), so that create_project can start new projects from it with templateName. " +
+      "Use it to keep the wall types, materials and loaded families you set up, so that the next project starts with them. " +
+      "A template takes the whole model, everything the project holds at this moment, walls, floors and furniture too: a template saved from a built house brings that house into every project made from it. " +
+      "So save one from a project that holds only what new projects should start with. " +
+      "The project stays the active document, on its own .rvt, and you carry on working in it. " +
+      "The tool saves it too: it writes the project as it is now, unsaved changes included, to the template and then back over the .rvt, so afterwards the project is saved, isModified is false, and no save_project is needed. " +
+      "It changes no model and adds no Undo step, and Revit keeps a numbered backup such as <name>.0001.rvt beside the project when it writes it. " +
+      "It refuses when no project is active, when the active document was never saved or its file is not a .rvt in the test folder (use create_project or open_project first), " +
+      "when that .rvt is read-only, and when a template of that name already exists: it overwrites nothing, so pick another name. " +
+      "Pass a name and never a path, with no dots apart from an optional .rte ending. " +
+      "Returns { name, path, templatePath, isModified, dialogs }: path is the project's file, templatePath is the new template, and dialogs ([{ dialogId, message }]) lists the Revit dialogs that came up and were refused, usually none. " +
+      "If saving back to the project fails, the error says in capital letters that the active document stayed on the template. Then do not call save_project, because it would write into the template, and tell the user. " +
+      "Takes several seconds. Related tools: create_project, save_project, open_project, get_model_info.",
+    inputSchema: { name: templateName },
   },
   {
     name: "list_types",

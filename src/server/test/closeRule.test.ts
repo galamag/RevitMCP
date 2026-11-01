@@ -54,6 +54,30 @@ describe("can-close path rule", () => {
     assert.equal(verdict.reasons.length, 1);
   });
 
+  it("refuses a project template left open as a document, saved or not, in any letter case", () => {
+    for (const extension of [".rte", ".RTE", ".Rte"]) {
+      const verdict = checkCanClose([{ title: "шаблон", path: `${FOLDER}\\шаблон${extension}`, isModified: false }], FOLDER);
+
+      assert.equal(verdict.ok, false, extension);
+      assert.equal(verdict.reasons.length, 1, extension);
+      assert.match(verdict.reasons.join("\n"), /template/, extension);
+      assert.match(verdict.reasons.join("\n"), /шаблон/, extension);
+    }
+  });
+
+  it("names a modified template once for each problem it has", () => {
+    const verdict = checkCanClose([{ title: "шаблон", path: `${FOLDER}\\шаблон.rte`, isModified: true }], FOLDER);
+
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.reasons.length, 2);
+  });
+
+  it("still passes a project whose name only contains .rte", () => {
+    const documents = [{ title: "a", path: `${FOLDER}\\a.rte-копия.rvt`, isModified: false }];
+
+    assert.equal(checkCanClose(documents, FOLDER).ok, true);
+  });
+
   it("refuses an answer it cannot read", () => {
     assert.equal(checkCanClose(undefined, FOLDER).ok, false);
     assert.equal(checkCanClose([{ title: "a", path: `${FOLDER}\\a.rvt` }], FOLDER).ok, false);
