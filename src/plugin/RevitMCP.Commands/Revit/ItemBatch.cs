@@ -49,14 +49,16 @@ internal static class ItemBatch
     /// <summary>
     /// Creates each entry with <paramref name="create"/>. <paramref name="readBack"/> gets each new element after the
     /// commit, when Revit has finished with it, so that <c>actual</c> holds what the model holds. With nothing to create
-    /// no transaction opens, as it would be an empty Undo step.
+    /// no transaction opens, as it would be an empty Undo step. <paramref name="warningsOf"/>, when given, gets each new
+    /// element at the same time and returns what to warn about that item: a created item has no other way to carry a warning.
     /// </summary>
     public static JsonElement Run<T>(
         Document document,
         string method,
         IReadOnlyList<BatchEntry<T>> entries,
         Func<T, Element> create,
-        Func<Element, object> readBack)
+        Func<Element, object> readBack,
+        Func<Element, IReadOnlyList<string>>? warningsOf = null)
     {
         var results = entries.Select(entry => entry.Settled).ToArray();
         var outcome = results.All(result => result is not null)
@@ -65,7 +67,7 @@ internal static class ItemBatch
 
         if (outcome.Committed)
         {
-            ReadBackAll(document, results, readBack, method);
+            ReadBackAll(document, results, readBack, warningsOf, method);
         }
 
         var batch = new BatchResult();
@@ -123,7 +125,12 @@ internal static class ItemBatch
     }
 
     /// <summary>The batch has landed by now, so a failure here must not read as a failed call.</summary>
-    private static void ReadBackAll(Document document, ItemResult?[] results, Func<Element, object> readBack, string method)
+    private static void ReadBackAll(
+        Document document,
+        ItemResult?[] results,
+        Func<Element, object> readBack,
+        Func<Element, IReadOnlyList<string>>? warningsOf,
+        string method)
     {
         for (var position = 0; position < results.Length; position++)
         {
@@ -149,7 +156,11 @@ internal static class ItemBatch
                     continue;
                 }
 
-                results[position] = created with { Actual = JsonSerializer.SerializeToElement(readBack(element), ProjectSupport.Options) };
+                results[position] = created with
+                {
+                    Actual = JsonSerializer.SerializeToElement(readBack(element), ProjectSupport.Options),
+                    Warnings = warningsOf?.Invoke(element) ?? created.Warnings,
+                };
             }
             catch (Exception e)
             {

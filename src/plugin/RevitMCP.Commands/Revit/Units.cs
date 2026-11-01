@@ -1,3 +1,4 @@
+using System.Globalization;
 using Autodesk.Revit.DB;
 
 namespace RevitMCP.Commands;
@@ -23,6 +24,9 @@ public static class Units
 
     public static double RadToDeg(double radians) =>
         UnitUtils.Convert(radians, UnitTypeId.Radians, UnitTypeId.Degrees);
+
+    /// <summary>A number, such as a length in millimetres or an angle, as text for a message, with a point for the decimals whatever the culture of the machine.</summary>
+    public static string FormatNumber(double millimetres) => millimetres.ToString("0.###", CultureInfo.InvariantCulture);
 
     public static XYZ PointMm(double x, double y, double z = 0) =>
         new(MmToInternal(x), MmToInternal(y), MmToInternal(z));

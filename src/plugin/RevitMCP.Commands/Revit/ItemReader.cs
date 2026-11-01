@@ -191,6 +191,30 @@ internal readonly record struct ItemReader(JsonElement Item, string Where)
             + $"The types of {category} in this project: {Listing(valid, ", see list_types")}.");
     }
 
+    /// <summary>
+    /// Reads the type of a loaded family by ID, whatever its category, as <c>load_family</c> and <c>list_types</c> give them.
+    /// </summary>
+    public FamilySymbol FamilyType(Document document, string key)
+    {
+        if (ElementIds.TryParse(ReadId(key), out var id) && document.GetElement(id) is FamilySymbol symbol)
+        {
+            return symbol;
+        }
+
+        var valid = new FilteredElementCollector(document)
+            .OfClass(typeof(FamilySymbol))
+            .Cast<FamilySymbol>()
+            .OrderBy(type => type.FamilyName, StringComparer.Ordinal)
+            .ThenBy(type => type.Name, StringComparer.Ordinal)
+            .ThenBy(type => type.Id.Value)
+            .Select(type => $"{type.Id} ('{type.FamilyName}: {type.Name}')")
+            .ToList();
+
+        throw Refuse(
+            $"{key} {Item.GetProperty(key).GetRawText()} is not a type of a loaded family. Take it from actual.typeIds of load_family, or from list_types with doors, windows, furniture or plumbing. "
+            + $"The family types of this project: {Listing(valid, ", see list_types")}.");
+    }
+
     /// <summary>Reads an element of the model by ID, with the same <paramref name="category"/> word as <c>list_types</c>.</summary>
     public T Instance<T>(Document document, string key, string category)
         where T : Element

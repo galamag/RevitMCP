@@ -49,6 +49,8 @@ public sealed class CommandRegistry
         new CreateCeilingsCommand(),
         new CreateFloorOpeningsCommand(),
         new CreateGroundCommand(),
+        new LoadFamilyCommand(),
+        new PlaceInstancesCommand(),
         new AttachWallsCommand(),
         new DeleteElementsCommand(),
         new UndoLastOperationCommand(undoTracker),

@@ -23,6 +23,8 @@
     "create_ceilings",
     "create_floor_openings",
     "create_ground",
+    "load_family",
+    "place_instances",
     "attach_walls",
     "delete_elements",
     "undo_last_operation",

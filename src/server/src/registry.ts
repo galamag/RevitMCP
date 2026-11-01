@@ -600,6 +600,90 @@ export const tools: readonly ToolDefinition[] = [
     },
   },
   {
+    name: "load_family",
+    description:
+      "Loads families from the library of this machine into the active project, the whole family or one named type of it. path is relative to the library folder, C:\\ProgramData\\Autodesk\\RVT 2027\\Libraries\\Russian. " +
+      "It must name a .rfa file that exists there, with \\ or / between the names, and nothing outside the folder is reachable: a drive, a share, a rooted path or .. is refused. " +
+      "The folder and file names are Russian, with spaces, and stay exactly as written, so copy them from the description of path, which names the folders that hold doors, windows, furniture, plumbing fixtures and plants. " +
+      "Without typeName the whole family loads, with every type it has. With typeName only that type loads, and it is matched exactly: a type stored in the family, or a row of its type catalog, " +
+      "which is the first column of the .txt file that has the name of the .rfa and lies beside it. A name that is neither fails the item, and the batch rolls back. " +
+      "A family or a type that the project holds already, matched by the name of the family and the exact name of the type, is not loaded again: it gives status already_existed, and it is left as it is, because a reload would reset the sizes written on it. " +
+      "When every item already exists, nothing changes and no Undo step is added. already_existed still stands when the batch fails. " +
+      "A family with a catalog that is already loaded, whole or in part, is reported as it is: name a row in typeName to load a row that is not there yet. " +
+      "Loading a row of a family that is in the project already adds that row only, and leaves the other rows as they are, sizes included. " +
+      "The same file twice in one list is refused, and so are two files of one name, the whole family together with a type of it, and one type twice; two different types of one family are fine. " +
+      "SIZES: a type catalog has size columns, but Revit ignores them here, because their names are Russian and the names of the parameters follow the language of the interface. " +
+      "So a door row called 800 x 2100 really is 850 x 2000, and a window row called 600 x 1200 is 600 x 900. This tool does not read the catalog, so read its sizes yourself and give them: " +
+      "widthMm and heightMm, in millimetres, are written on the type named by typeName, as the Width and Height that Revit names as such, and read back from the type. They need typeName. " +
+      "A type whose size Revit cannot write, such as the doors of the GOST folders, whose size the family computes, or a family with no width or height, fails the item after it was loaded, and the batch rolls back, so nothing stays loaded: leave that size out. " +
+      "A type from a catalog that is loaded without widthMm and heightMm gets a warning with the size it really has. Revit also reports the ignored columns in warnings at the top, which is expected for a catalog. " +
+      "A load brings the nested families of a family too, so a type that you did not ask for can appear in list_types. " +
+      "actual is { familyId, typeIds }: familyId is the id of the family as Revit gave it back, and typeIds lists [{ id, name, widthMm, heightMm }] sorted by name, read from the project. " +
+      "For a whole-family item it lists every type of the family, and for an item with typeName only that type. widthMm and heightMm are the Width and Height of the type in millimetres, or null for a type that has none, as furniture often has. " +
+      "elementId is the id of the family for a whole-family item and the id of the type for an item with typeName. Take typeId for place_instances from typeIds. " +
+      BATCH_RULES +
+      " Related tools: place_instances, list_types, get_elements, create_walls, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z
+          .strictObject({
+            path: z
+              .string()
+              .min(1)
+              .describe(
+                "The family file, relative to the library folder, ending in .rfa, for example Russia\\Мебель\\Кровати\\Кровать-Стандарт.rfa. Russian names and spaces are kept as written. " +
+                  "Under Russia the folders are Двери (doors), Окна (windows), Мебель (furniture), Сантехника (plumbing fixtures) and Озеленение (plants). Many families in Двери and Окна have a .txt type catalog beside them.",
+              ),
+            typeName: z
+              .string()
+              .min(1)
+              .optional()
+              .describe("The exact name of one type to load: a type stored in the family or a row of its type catalog, for example 800 x 2100 мм. Leave it out to load the whole family. The name is matched as written, with its Russian letters, its spaces and its case."),
+            widthMm: z.number().positive().optional().describe("The width to write on the type, in millimetres. Needs typeName. Revit ignores the sizes of a type catalog, so give it when the width matters."),
+            heightMm: z.number().positive().optional().describe("The height to write on the type, in millimetres. Needs typeName. Revit ignores the sizes of a type catalog, so give it when the height matters."),
+          })
+          .refine((item) => item.typeName !== undefined || (item.widthMm === undefined && item.heightMm === undefined), {
+            message: "widthMm and heightMm are written on one type, so name it in typeName.",
+          }),
+      ),
+    },
+  },
+  {
+    name: "place_instances",
+    description:
+      "Places instances of loaded family types in the active project: furniture, fixtures, plants and the like, standing on a level or hanging on a wall. Take typeId from actual.typeIds of load_family, " +
+      "or from list_types with furniture or plumbing; a type that is no family type is refused, and the refusal lists some that are. " +
+      "pointMm is { x, y } in millimetres in model coordinates, and levelId comes from get_model_info. The height of the instance is the elevation of the level plus elevationMm, 0 by default, " +
+      "so on a level at 4000 an elevationMm of 0 stands at 4000. A family that keeps a height of its own does not take another one: a bed stands on its level, and a light fitting stands at the mounting height of its family. " +
+      "Such an item fails after Revit placed it, and the error says at what height Revit put it, which is the elevationMm to ask for; a toilet that stands on the floor takes any. " +
+      "rotationDeg turns the instance about the vertical through the point, in degrees counter-clockwise seen from above, and any number is taken. " +
+      "The family decides how it is placed, and Revit names that its placement type. A family that stands on a level, such as a bed, a table, a toilet that is not on the wall or a tree, takes no hostWallId and no flipFacing. " +
+      "A family that hangs on a wall, such as a sink, a bath or a wall-hung toilet, needs hostWallId, the id of a wall from create_walls or get_elements with walls, and a call without it is refused before anything changes, " +
+      "because Revit would otherwise put it at a wrong place with no geometry and say nothing. Such an instance takes its direction from the wall, so rotationDeg is refused for it. " +
+      "It stands on the axis of the wall, at the point of the axis nearest to pointMm, so a pointMm beside the wall is moved onto it and the item carries a warning that says by how much. " +
+      "Its body lies on one side of the wall, the left of the direction from the start of the wall to its end, and flipFacing true puts it on the other side. " +
+      "The height must be one the wall reaches, or the item is refused: a wall on another level is the usual cause, so check levelId. " +
+      "Any other placement type, such as a family on a face or a work plane, is refused with its name. A type that is not active is activated and the model regenerated before its first instance. " +
+      "After each instance is made, where it stands, how it is turned and its level are read from the model and compared with the request, and an instance that Revit put elsewhere fails its item, and the batch rolls back. " +
+      "actual is { typeId, pointMm, elevationMm, rotationDeg, levelId, hostWallId, facingFlipped }: pointMm is { x, y } in millimetres as the model holds it, elevationMm is the height above levelId, " +
+      "rotationDeg is from 0 up to, not including, 360, hostWallId is null for an instance with no host, and facingFlipped says whether flipFacing was done. Compare it with what you asked for. " +
+      BATCH_RULES +
+      " Related tools: load_family, list_types, get_model_info, create_walls, get_elements, delete_elements, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.strictObject({
+          typeId: elementId("The id of a family type, from actual.typeIds of load_family or from list_types"),
+          pointMm: planPoint("Where the instance stands"),
+          levelId: elementId("The id of the level the instance belongs to, from get_model_info"),
+          elevationMm: z.number().default(0).describe("The height of the instance above its level, in millimetres. Negative is below the level."),
+          rotationDeg: z.number().default(0).describe("The turn about the vertical through the point, in degrees counter-clockwise seen from above. Not for a family that hangs on a wall."),
+          hostWallId: elementId("The id of the wall a wall-hung family hangs on. Required for such a family, and refused for one that stands on a level").optional(),
+          flipFacing: z.boolean().default(false).describe("Puts a wall-hung instance on the other side of its wall. Only for a family with hostWallId."),
+        }),
+      ),
+    },
+  },
+  {
     name: "attach_walls",
     description:
       "Attaches the tops of walls to a roof, so that each wall follows the underside of the roof. A wall below the roof rises to it, which is what fills the gable ends of a gable roof, " +

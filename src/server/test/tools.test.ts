@@ -54,6 +54,9 @@ const attachment = { wallId: "10", roofId: "20" };
 const ceiling = { boundaryMm: floor.boundaryMm, typeId: "1", levelId: "2", heightOffsetMm: 2350 };
 const opening = { floorId: "10", boundaryMm: floor.boundaryMm };
 const ground = { boundaryMm: floor.boundaryMm, levelId: "2", topOffsetMm: -400, typeId: "5" };
+const family = { path: "Russia\\Мебель\\Кровати\\Кровать-Стандарт.rfa" };
+const familyRow = { path: "Russia\\Двери\\Дверь-Одинарная-Панель.rfa", typeName: "800 x 2100 мм", widthMm: 800, heightMm: 2100 };
+const instance = { typeId: "7", pointMm: { x: 1000, y: 2000 }, levelId: "2" };
 const material = { name: "Краснодарский кирпич", colorRgb: { r: 170, g: 40, b: 35 } };
 const layer = { thicknessMm: 200, materialId: "7", function: "structure" };
 const typeItem = { category: "walls", baseTypeId: "408", name: "Стена 250 мм" };
@@ -91,7 +94,9 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "get_warnings",
         "list_materials",
         "list_types",
+        "load_family",
         "open_project",
+        "place_instances",
         "save_project",
         "undo_last_operation",
       ],
@@ -341,6 +346,44 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["create_ground", { items: [{ ...ground, levelId: "" }] }],
     ["create_ground", { items: [{ ...ground, boundaryMm: ground.boundaryMm.slice(0, 2) }] }],
     ["create_ground", { items: [{ ...ground, elevationMm: 0 }] }],
+    ["load_family", {}],
+    ["load_family", { items: [] }],
+    ["load_family", { items: batch(501, family) }],
+    ["load_family", { items: [{}] }],
+    ["load_family", { items: [{ typeName: "800 x 2100 мм" }] }],
+    ["load_family", { items: [{ path: 5 }] }],
+    ["load_family", { items: [{ path: "" }] }],
+    ["load_family", { items: [{ ...family, typeName: "" }] }],
+    ["load_family", { items: [{ ...family, typeName: 800 }] }],
+    ["load_family", { items: [{ ...familyRow, widthMm: 0 }] }],
+    ["load_family", { items: [{ ...familyRow, widthMm: -800 }] }],
+    ["load_family", { items: [{ ...familyRow, widthMm: "800" }] }],
+    ["load_family", { items: [{ ...familyRow, heightMm: 0 }] }],
+    ["load_family", { items: [{ ...familyRow, heightMm: null }] }],
+    ["load_family", { items: [{ ...family, widthMm: 800 }] }],
+    ["load_family", { items: [{ ...family, heightMm: 2100 }] }],
+    ["load_family", { items: [{ ...family, name: "Кровать" }] }],
+    ["load_family", { items: [{ ...family, family: "Кровать-Стандарт" }] }],
+    ["place_instances", {}],
+    ["place_instances", { items: [] }],
+    ["place_instances", { items: batch(501, instance) }],
+    ["place_instances", { items: [{ ...instance, typeId: undefined }] }],
+    ["place_instances", { items: [{ ...instance, typeId: 7 }] }],
+    ["place_instances", { items: [{ ...instance, typeId: "" }] }],
+    ["place_instances", { items: [{ ...instance, pointMm: undefined }] }],
+    ["place_instances", { items: [{ ...instance, pointMm: { x: 1 } }] }],
+    ["place_instances", { items: [{ ...instance, pointMm: { x: 1, y: 2, z: 3 } }] }],
+    ["place_instances", { items: [{ ...instance, pointMm: { x: "1", y: 2 } }] }],
+    ["place_instances", { items: [{ ...instance, levelId: undefined }] }],
+    ["place_instances", { items: [{ ...instance, levelId: 2 }] }],
+    ["place_instances", { items: [{ ...instance, elevationMm: "0" }] }],
+    ["place_instances", { items: [{ ...instance, elevationMm: null }] }],
+    ["place_instances", { items: [{ ...instance, rotationDeg: "90" }] }],
+    ["place_instances", { items: [{ ...instance, hostWallId: 10 }] }],
+    ["place_instances", { items: [{ ...instance, hostWallId: "" }] }],
+    ["place_instances", { items: [{ ...instance, flipFacing: "true" }] }],
+    ["place_instances", { items: [{ ...instance, zMm: 0 }] }],
+    ["place_instances", { items: [{ ...instance, hostId: "10" }] }],
     ["attach_walls", {}],
     ["attach_walls", { items: [] }],
     ["attach_walls", { items: batch(501, attachment) }],
@@ -568,6 +611,92 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.equal(bridge.frames[0]?.method, "create_ground");
     assert.deepEqual(bridge.frames[0]?.params, { items });
     assert.match(textOf(result), /toposolid and floor overlap/);
+  });
+
+  it("passes families with a Cyrillic path and type name intact, and no size unless one is given", async (t) => {
+    const answer = { committed: true, items: [{ index: 0, status: "created", elementId: "300301" }], warnings: [], errors: [], dialogs: [] };
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
+    const items = [
+      family,
+      familyRow,
+      { path: "Russia\\Окна\\Для России\\ГОСТ 30674-99\\Окно 1-Распашное - Один. переплет с несколькими оконными стеклами - ГОСТ 30674-99.rfa", typeName: "ОП Д2 400-450 ГОСТ 30674-99" },
+      { ...familyRow, widthMm: 600.5 },
+    ];
+
+    const result = await client.callTool({ name: "load_family", arguments: { items } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "load_family");
+    assert.deepEqual(bridge.frames[0]?.params, { items });
+    assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
+  it("passes instances with the defaults filled in, a host and a flip kept, and a negative elevation and angle", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+    const hung = { ...instance, hostWallId: "10", flipFacing: true };
+
+    const result = await client.callTool({
+      name: "place_instances",
+      arguments: { items: [instance, hung, { ...instance, elevationMm: -150.5, rotationDeg: -90.5 }, { ...instance, rotationDeg: 720 }] },
+    });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "place_instances");
+    assert.deepEqual(bridge.frames[0]?.params, {
+      items: [
+        { ...instance, elevationMm: 0, rotationDeg: 0, flipFacing: false },
+        { ...hung, elevationMm: 0, rotationDeg: 0 },
+        { ...instance, elevationMm: -150.5, rotationDeg: -90.5, flipFacing: false },
+        { ...instance, elevationMm: 0, rotationDeg: 720, flipFacing: false },
+      ],
+    });
+  });
+
+  it("tells the model the truth about load_family", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "load_family")?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    assert.match(description, /500/);
+    for (const word of ["created", "failed", "rolled_back", "not attempted", "actual", "already_existed"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /Libraries\\Russian/);
+    assert.match(description, /nothing outside the folder is reachable/);
+    assert.match(description, /Revit ignores them here/);
+    assert.match(description, /850 x 2000/);
+    assert.match(description, /This tool does not read the catalog/);
+    assert.match(description, /They need typeName/);
+    assert.match(description, /GOST/);
+    assert.match(description, /nothing stays loaded/);
+    assert.match(description, /reset the sizes/);
+    assert.match(description, /typeIds/);
+    assert.match(description, /place_instances/);
+  });
+
+  it("tells the model the truth about place_instances", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "place_instances")?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    assert.match(description, /500/);
+    for (const word of ["created", "failed", "rolled_back", "not attempted", "actual"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /needs hostWallId/);
+    assert.match(description, /refused before anything changes/);
+    assert.match(description, /wrong place with no geometry/);
+    assert.match(description, /axis of the wall/);
+    assert.match(description, /flipFacing/);
+    assert.match(description, /placement type/);
+    assert.match(description, /compared with the request/);
+    assert.match(description, /load_family/);
   });
 
   it("tells the model the truth about create_ceilings", async (t) => {

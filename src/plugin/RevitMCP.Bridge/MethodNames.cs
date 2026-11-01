@@ -25,6 +25,8 @@ public static class MethodNames
     public const string CreateCeilings = "create_ceilings";
     public const string CreateFloorOpenings = "create_floor_openings";
     public const string CreateGround = "create_ground";
+    public const string LoadFamily = "load_family";
+    public const string PlaceInstances = "place_instances";
     public const string AttachWalls = "attach_walls";
     public const string DeleteElements = "delete_elements";
     public const string UndoLastOperation = "undo_last_operation";
@@ -55,6 +57,8 @@ public static class MethodNames
         CreateCeilings,
         CreateFloorOpenings,
         CreateGround,
+        LoadFamily,
+        PlaceInstances,
         AttachWalls,
         DeleteElements,
         UndoLastOperation,
