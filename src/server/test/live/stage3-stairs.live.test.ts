@@ -114,8 +114,8 @@ const OTHER_TREAD_MM = 220;
 const OTHER_RISERS = 14;
 /** Between the axes of two runs side by side: their width and a gap of 100. */
 const RUN_PITCH_MM = WIDTH_MM + 100;
-/** Above the 30000 feet the API allows a run. Nothing checks it before the scope, as Revit took every width up to there, however silly. */
-const WIDTH_REVIT_REFUSES_MM = 10_000_000;
+/** Just above the 30000 feet the API allows a run. Revit took every width up to there, however silly, and threw above it. */
+const WIDTH_PAST_THE_LIMIT_MM = 9_144_001;
 /**
  * A hair under half a tread past 15 treads. Live Revit makes 16 risers of it, while its tread depth, 249.99999999999997, makes the
  * check before the scope count 17. It is the one length known to pass that check and come out wrong, so it is what reaches the check inside the scope.
@@ -571,6 +571,7 @@ describe("stage 3 live checks: stairs", { timeout: 180_000 }, () => {
         [{ items: [{ ...good, topLevelId: good.baseLevelId }] }, /must lie above/, "one level"],
         [{ items: [{ ...good, baseLevelId: w.upper.id, topLevelId: w.ground.id }] }, /must lie above/, "levels the wrong way round"],
         [{ items: [{ ...good, widthMm: 0 }] }, /widthMm/, "no width"],
+        [{ items: [{ ...good, widthMm: WIDTH_PAST_THE_LIMIT_MM }] }, /create_stairs item 0: widthMm must be above 0 and at most 9144000.*not 9144001/, "wider than Revit takes"],
         [{ items: [{ ...good, desiredRisers: 1.5 }] }, /desiredRisers/, "half a riser"],
         [{ items: [{ ...good, desiredRisers: 0 }] }, /desiredRisers/, "no risers"],
         [{ items: [{ ...uShaped(x), desiredRisers: 3 }] }, /2 runs take at least 4/, "fewer risers than two runs take"],
@@ -636,16 +637,6 @@ describe("stage 3 live checks: stairs", { timeout: 180_000 }, () => {
       assert.ok(apart.errors.length > 0, "the reason is in errors too");
       assert.deepEqual(apart.dialogs, []);
       assert.deepEqual(await stairsCounts(client), before, "the scope took its runs with it");
-
-      // An exception from the body of the scope, with its run already made.
-      const wide = await createStairs(client, { ...straight(x), widthMm: WIDTH_REVIT_REFUSES_MM });
-
-      console.log(`# too wide: ${JSON.stringify(wide)}`);
-      assert.equal(wide.committed, false, JSON.stringify(wide));
-      assert.equal(wide.items[0]?.status, "failed", JSON.stringify(wide));
-      assert.ok(wide.items[0]?.error, "the item says why");
-      assert.deepEqual(wide.dialogs, []);
-      assert.deepEqual(await stairsCounts(client), before, "the scope took its run with it");
 
       // Revit is free: both a transaction and a new scope can start, and a good stairs lands at the same place.
       await assertRevitIsFree(client);

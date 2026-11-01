@@ -54,7 +54,7 @@ public static class EditScopeOperation
                         if (inner.Committed)
                         {
                             scope.Commit(closing);
-                            landed = HoldsStairs(doc, stairsId, problems);
+                            landed = HasClosed(scope, problems) && HoldsStairs(doc, stairsId, problems);
                         }
                     }
                     else
@@ -88,6 +88,21 @@ public static class EditScopeOperation
             [.. inner?.Warnings ?? [], .. closing.Warnings],
             [.. inner?.Errors ?? [], .. closing.Errors, .. problems],
             [.. inner?.Dialogs ?? [], .. guard.TakeRecorded()]);
+    }
+
+    /// <summary>
+    /// A commit returns nothing, so a scope that stayed open shows only here. It is cancelled next, which takes the stairs with it,
+    /// and that cancel can fail too, so stairs in a scope that is still open must not count as landed, however they read now.
+    /// </summary>
+    private static bool HasClosed(StairsEditScope scope, List<string> problems)
+    {
+        if (!scope.IsActive)
+        {
+            return true;
+        }
+
+        problems.Add("The edit mode was still open after Revit committed it, so it is cancelled and the stairs do not count as landed.");
+        return false;
     }
 
     /// <summary>Live Revit: a scope that ends with nothing to keep raises nothing and leaves no stairs.</summary>

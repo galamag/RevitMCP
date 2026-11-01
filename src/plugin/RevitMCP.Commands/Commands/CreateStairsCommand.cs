@@ -30,6 +30,9 @@ public sealed class CreateStairsCommand : ICommand
     /// <summary>The most runs of one stairs, which <c>registry.ts</c> states too.</summary>
     private const int MaxRuns = 2;
 
+    /// <summary>The widest run, which <c>registry.ts</c> states too: the 30000 feet of <see cref="StairsRun.ActualRunWidth"/>. Live Revit took this width and threw above it.</summary>
+    private const double MaxWidthMm = 9_144_000;
+
     /// <summary>A height closer than this to the one asked for is the same one: the noise of converting units.</summary>
     private const double SameHeightMm = 0.1;
 
@@ -183,9 +186,9 @@ public sealed class CreateStairsCommand : ICommand
 
         var widthMm = reader.Number("widthMm");
 
-        if (widthMm <= 0)
+        if (widthMm <= 0 || widthMm > MaxWidthMm)
         {
-            throw reader.Refuse($"widthMm must be above 0, not {Units.FormatNumber(widthMm)}.");
+            throw reader.Refuse($"widthMm must be above 0 and at most {Units.FormatNumber(MaxWidthMm)}, the widest run Revit takes, not {Units.FormatNumber(widthMm)}.");
         }
 
         var desired = item.TryGetProperty("desiredRisers", out var value)

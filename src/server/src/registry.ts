@@ -50,6 +50,7 @@ const MAX_ROOF_SLOPE_DEG = 90;
 const MIN_STAIRS_RISERS = 2;
 const MAX_STAIRS_RISERS = 500;
 const MAX_STAIRS_RUNS = 2;
+const MAX_STAIRS_WIDTH_MM = 9_144_000;
 
 /** The limits of a colour channel and of transparency, which the plugin checks too. */
 const MAX_COLOR_CHANNEL = 255;
@@ -747,7 +748,7 @@ export const tools: readonly ToolDefinition[] = [
       "Builds one staircase between two levels of the active project: straight with one run, or with two runs and a landing that Revit makes between them, such as a U-shaped staircase or one with a corner. " +
       "items holds exactly ONE staircase, unlike the other create_ tools, because Revit builds stairs in an edit mode of their own: send a second staircase in a second call. Take baseLevelId and topLevelId from get_model_info, and typeId from list_types with stairs. " +
       "runsMm lists the runs from the bottom up. startMm and endMm are the ends of the CENTRE LINE of a run, as { x, y } in millimetres in model coordinates, and a run climbs from startMm to endMm. The heights come from the levels and are worked out here, so no height is given. " +
-      `desiredRisers is the number of risers of the whole staircase, from ${MIN_STAIRS_RISERS} to ${MAX_STAIRS_RISERS}. The height between the levels divided by it is the riser height, so it decides how steep the stairs are. widthMm is the width of each run, in millimetres. ` +
+      `desiredRisers is the number of risers of the whole staircase, from ${MIN_STAIRS_RISERS} to ${MAX_STAIRS_RISERS}. The height between the levels divided by it is the riser height, so it decides how steep the stairs are. widthMm is the width of each run, in millimetres, at most ${MAX_STAIRS_WIDTH_MM}, the widest Revit takes. ` +
       "The tread depth comes from the type, and the length of a run decides its risers: a run makes its length divided by the tread depth, rounded, plus 1, so a run of N risers is (N - 1) x tread depth long. 16 risers at a tread depth of 250 take a straight run of 3750. " +
       "The risers of the runs must add up to desiredRisers, and any split will do: 16 risers at 250 take two runs of 1750 and 1750, or 2250 and 1250. Anything else would leave stairs that stop short of the top level or run past it, which Revit accepts with only a warning, so it is refused before anything changes, and the refusal states the tread depth of the type and the length needed. " +
       "A length that rounds to the right number is taken, and Revit fits the run to the exact length from its start: 3740 becomes 3750. " +
@@ -757,8 +758,9 @@ export const tools: readonly ToolDefinition[] = [
       "A run narrower than the minimum of the type and a riser above its maximum both land, and warnings says so, so read warnings. " +
       "Revit adds the railings of the stairs by itself, of its default railing type, so do not make any: their ids are in actual.railingIds. Stairs do not cut floors: make the hole with create_floor_openings on the floor of the upper level, and pass actual.footprintMm as its boundaryMm. Build the stairs first, as the footprint comes from them. " +
       "The whole call is one Undo step, railings and landing included. Input is checked before anything changes, and a problem refuses the call with an error naming the item and, for a bad id, the valid ones. Nothing is substituted. " +
-      "Otherwise it returns { committed, items, warnings, errors, dialogs }, with one entry in items: { index, status, elementId, requested, actual, warnings, error }. Read committed first: when it is false the model did not change. " +
-      "created means the stairs are in the model. failed means Revit took the stairs and they did not come out as asked, and error says why: everything was cancelled and nothing stays. rolled_back means nothing stays and the reason is in errors. " +
+      "Otherwise it returns { committed, items, warnings, errors, dialogs }, with one entry in items: { index, status, elementId, requested, actual, warnings, error }. Read committed first: when it is false the model did not change, unless errors says otherwise. " +
+      "errors says otherwise when stairs are still in the model after a failure: then do not take them as gone, read the model, and ask the user to look at Revit, which may be left in edit mode. " +
+      "created means the stairs are in the model. failed means Revit took the stairs and they did not come out as asked, and error says why: everything was cancelled and nothing stays, unless errors says otherwise. rolled_back means nothing stays, unless errors says otherwise, and the reason is in errors. " +
       "actual is { risers, riserHeightMm, treadDepthMm, topElevationMm, footprintMm, railingIds }, read from the model after the commit. risers counts what was built. topElevationMm is the height where the last run really ends, in millimetres in model coordinates, which must be that of the top level. " +
       "footprintMm lists the four corners, as { x, y }, of the rectangle that holds all the runs and the landing. elementId is the id of the stairs. The project then has unsaved changes. " +
       "Related tools: list_types, get_model_info, create_floor_openings, get_elements, undo_last_operation, get_view_snapshot, save_project.",
@@ -774,7 +776,7 @@ export const tools: readonly ToolDefinition[] = [
               .min(1)
               .max(MAX_STAIRS_RUNS)
               .describe("The runs from the bottom up: one for straight stairs, two for stairs with a landing between them."),
-            widthMm: z.number().positive().describe("The width of each run, in millimetres."),
+            widthMm: z.number().positive().max(MAX_STAIRS_WIDTH_MM).describe("The width of each run, in millimetres."),
             desiredRisers: z.number().int().min(MIN_STAIRS_RISERS).max(MAX_STAIRS_RISERS).describe("The number of risers of the whole staircase. The risers of the runs must add up to it."),
           }),
         )

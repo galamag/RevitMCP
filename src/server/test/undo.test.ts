@@ -387,20 +387,36 @@ describe("undoWithOneRetry, the undo of the live tests", { timeout: 20_000 }, ()
     assert.deepEqual(notes, []);
   });
 
-  it("posts a refused undo once more, at once, and writes that to the test", async (t) => {
+  it("posts a refused undo once more, at once, after one more read, and writes that to the test", async (t) => {
+    const { bridge, notes, run } = await retryAgainst(t, ["refused", "refused", "undone"]);
+
+    assert.equal((await run()).state, "undone");
+    assert.deepEqual(bridge.frames.map((frame) => frame.method), ["undo_last_operation", "get_last_undo_result", "get_last_undo_result", "undo_last_operation", "get_last_undo_result"]);
+    assert.equal(notes.length, 1);
+    assert.match(notes[0] ?? "", /Revit refused/);
+    assert.match(notes[0] ?? "", /it is posted once more/);
+  });
+
+  it("returns an undo that ran late and does not post again, which would take the next step", async (t) => {
     const { bridge, notes, run } = await retryAgainst(t, ["refused", "undone"]);
 
     assert.equal((await run()).state, "undone");
-    assert.deepEqual(bridge.frames.map((frame) => frame.method), ["undo_last_operation", "get_last_undo_result", "undo_last_operation", "get_last_undo_result"]);
-    assert.equal(notes.length, 1);
-    assert.match(notes[0] ?? "", /Revit refused/);
+    assert.deepEqual(bridge.frames.map((frame) => frame.method), ["undo_last_operation", "get_last_undo_result", "get_last_undo_result"]);
+    assert.match(notes[0] ?? "", /it is not posted again/);
+  });
+
+  it("does not post again when the read after a refusal says anything else", async (t) => {
+    const { bridge, run } = await retryAgainst(t, ["refused", "other"]);
+
+    await assert.rejects(run(), /must not be posted again/);
+    assert.equal(bridge.frames.length, 3);
   });
 
   it("gives up after the second refusal", async (t) => {
-    const { bridge, run } = await retryAgainst(t, ["refused", "refused"]);
+    const { bridge, run } = await retryAgainst(t, ["refused", "refused", "refused"]);
 
     await assert.rejects(run(), /^UndoNotConfirmedError: Not undone/);
-    assert.equal(bridge.frames.length, 4);
+    assert.equal(bridge.frames.length, 5);
   });
 
   it("does not post again when it is not known what became of the undo", async (t) => {

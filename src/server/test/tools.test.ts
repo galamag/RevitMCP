@@ -427,6 +427,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["create_stairs", { items: [{ ...stairs, widthMm: 0 }] }],
     ["create_stairs", { items: [{ ...stairs, widthMm: -1000 }] }],
     ["create_stairs", { items: [{ ...stairs, widthMm: "1000" }] }],
+    ["create_stairs", { items: [{ ...stairs, widthMm: 9144001 }] }],
     ["create_stairs", { items: [{ ...stairs, desiredRisers: undefined }] }],
     ["create_stairs", { items: [{ ...stairs, desiredRisers: 1 }] }],
     ["create_stairs", { items: [{ ...stairs, desiredRisers: 501 }] }],
@@ -725,14 +726,19 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
     const twoRuns = { ...stairs, runsMm: [{ startMm: { x: 0.5, y: 0 }, endMm: { x: 0.5, y: 1750 } }, { startMm: { x: 1100.5, y: 1750 }, endMm: { x: 1100.5, y: 0 } }] };
 
+    const widest = { ...stairs, widthMm: 9144000 };
+
     const result = await client.callTool({ name: "create_stairs", arguments: { items: [stairs] } });
     const second = await client.callTool({ name: "create_stairs", arguments: { items: [twoRuns] } });
+    const third = await client.callTool({ name: "create_stairs", arguments: { items: [widest] } });
 
     assert.ok(!result.isError);
     assert.ok(!second.isError);
+    assert.ok(!third.isError);
     assert.equal(bridge.frames[0]?.method, "create_stairs");
     assert.deepEqual(bridge.frames[0]?.params, { items: [stairs] });
     assert.deepEqual(bridge.frames[1]?.params, { items: [twoRuns] });
+    assert.deepEqual(bridge.frames[2]?.params, { items: [widest] });
   });
 
   it("tells the model the truth about create_stairs", async (t) => {
@@ -757,6 +763,11 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /back beside it for U-shaped stairs, at a corner, or straight on/);
     assert.match(description, /fail the item and nothing stays/);
     assert.match(description, /a landing across the whole gap/);
+    assert.match(description, /at most 9144000, the widest Revit takes/);
+    assert.match(description, /when it is false the model did not change, unless errors says otherwise/);
+    assert.match(description, /stairs are still in the model after a failure/);
+    assert.match(description, /nothing stays, unless errors says otherwise/);
+    assert.doesNotMatch(description, /when it is false the model did not change\./, "the path that leaves stairs behind must not be denied");
     assert.match(description, /adds the railings of the stairs by itself/);
     assert.match(description, /Stairs do not cut floors/);
     assert.match(description, /actual\.footprintMm as its boundaryMm/);
