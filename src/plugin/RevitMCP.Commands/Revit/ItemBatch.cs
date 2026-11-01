@@ -51,6 +51,8 @@ internal static class ItemBatch
     /// commit, when Revit has finished with it, so that <c>actual</c> holds what the model holds. With nothing to create
     /// no transaction opens, as it would be an empty Undo step. <paramref name="warningsOf"/>, when given, gets each new
     /// element at the same time and returns what to warn about that item: a created item has no other way to carry a warning.
+    /// <paramref name="problemAfterCommit"/>, when given, gets each new element after the commit too, and returns why it does not hold, or
+    /// <c>null</c> when it does: for an element that Revit can leave in the model in a state the in-transaction check did not see.
     /// </summary>
     public static JsonElement Run<T>(
         Document document,
@@ -58,8 +60,9 @@ internal static class ItemBatch
         IReadOnlyList<BatchEntry<T>> entries,
         Func<T, Element> create,
         Func<Element, object> readBack,
-        Func<Element, IReadOnlyList<string>>? warningsOf = null) =>
-        RunMany(document, method, entries, input => [create(input)], readBack, warningsOf);
+        Func<Element, IReadOnlyList<string>>? warningsOf = null,
+        Func<Element, string?>? problemAfterCommit = null) =>
+        RunMany(document, method, entries, input => [create(input)], readBack, warningsOf, problemAfterCommit);
 
     /// <summary>
     /// <see cref="Run{T}"/> for an item that makes several elements, such as the railings of a stairs. The first element is the one
@@ -72,7 +75,8 @@ internal static class ItemBatch
         IReadOnlyList<BatchEntry<T>> entries,
         Func<T, IReadOnlyList<Element>> create,
         Func<Element, object> readBack,
-        Func<Element, IReadOnlyList<string>>? warningsOf = null)
+        Func<Element, IReadOnlyList<string>>? warningsOf = null,
+        Func<Element, string?>? problemAfterCommit = null)
     {
         var results = entries.Select(entry => entry.Settled).ToArray();
         var alsoCreated = new Dictionary<int, IReadOnlyList<ElementId>>();
@@ -82,7 +86,7 @@ internal static class ItemBatch
 
         if (outcome.Committed)
         {
-            ReadBackAll(document, results, readBack, warningsOf, method, alsoCreated);
+            ReadBackAll(document, results, readBack, warningsOf, method, alsoCreated, problemAfterCommit);
         }
 
         var batch = new BatchResult();
@@ -154,6 +158,8 @@ internal static class ItemBatch
     /// <summary>
     /// The batch has landed by now, so a failure here must not read as a failed call. <paramref name="alsoCreated"/>, when given, holds
     /// by position the further elements of an item that made several, and one of them that is gone fails the item.
+    /// <paramref name="problemAfterCommit"/>, when given, also fails the item that it gives a reason for: the element is still in the model,
+    /// so the error names it, and the rest of the batch has landed.
     /// </summary>
     public static void ReadBackAll(
         Document document,
@@ -161,7 +167,8 @@ internal static class ItemBatch
         Func<Element, object> readBack,
         Func<Element, IReadOnlyList<string>>? warningsOf,
         string method,
-        IReadOnlyDictionary<int, IReadOnlyList<ElementId>>? alsoCreated = null)
+        IReadOnlyDictionary<int, IReadOnlyList<ElementId>>? alsoCreated = null,
+        Func<Element, string?>? problemAfterCommit = null)
     {
         for (var position = 0; position < results.Length; position++)
         {
@@ -178,24 +185,24 @@ internal static class ItemBatch
                 {
                     // Revit removed it while committing, so it is not in the model and must not read as created.
                     Log.Error($"{method} element {id} is gone after the commit.");
-                    results[position] = created with
-                    {
-                        Status = ItemStatus.Failed,
-                        ElementId = null,
-                        Error = $"Revit removed this element when it committed the batch (it was created as {id} and is gone). The rest of the batch landed.",
-                    };
+                    results[position] = created.FailedAfterCommit(
+                        $"Revit removed this element when it committed the batch (it was created as {id} and is gone). The rest of the batch landed.");
                     continue;
                 }
 
                 if (alsoCreated is not null && alsoCreated.TryGetValue(position, out var others) && others.FirstOrDefault(other => document.GetElement(other) is null) is { } gone)
                 {
                     Log.Error($"{method} element {gone} is gone after the commit.");
-                    results[position] = created with
-                    {
-                        Status = ItemStatus.Failed,
-                        ElementId = null,
-                        Error = $"Revit removed element {gone} of this item when it committed the batch, so the item did not land whole. It made {id}, {string.Join(", ", others)}, and {gone} is gone. The rest of the batch landed.",
-                    };
+                    results[position] = created.FailedAfterCommit(
+                        $"Revit removed element {gone} of this item when it committed the batch, so the item did not land whole. It made {id}, {string.Join(", ", others)}, and {gone} is gone. The rest of the batch landed.");
+                    continue;
+                }
+
+                if (problemAfterCommit?.Invoke(element) is { } problem)
+                {
+                    // The element is in the model, so it is not "gone": the error names it, as the caller has no other way to find it.
+                    Log.Error($"{method} element {id} does not hold after the commit: {problem}");
+                    results[position] = created.FailedAfterCommit($"{problem} It is element {id}, and it is still in the model. The rest of the batch landed.");
                     continue;
                 }
 

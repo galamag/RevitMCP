@@ -647,12 +647,41 @@ describe("stage 3 live checks: rooms and room separators", { timeout: 180_000 },
     });
   });
 
+  it("a room that lost a wall is still read, with an area of 0", async () => {
+    await withClient(async (client) => {
+      const w = ready();
+      const kept = await furnished(client, "Осиротевшая", "150");
+      assert.ok(kept.areaM2 > 0);
+
+      // Without one wall the room is not enclosed any more: Revit keeps it, with its name and number, and its area is 0. It stays placed, so this is
+      // not an unplaced room, which no tool can make.
+      const walled = (await client.call("delete_elements", { ids: [kept.walls.ids[0]], dryRun: false })) as { committed: boolean; errors: string[] };
+      assert.equal(walled.committed, true, JSON.stringify(walled));
+
+      const byId = await elementsOf(client, { ids: [kept.roomId] });
+      console.log(`# room without a wall: ${JSON.stringify(byId.elements[0])}`);
+      assert.deepEqual(byId.notFound, []);
+      const [row] = byId.elements;
+      assert.deepEqual([row?.category, row?.name, row?.number, row?.levelId, row?.areaM2], ["rooms", "Осиротевшая", "150", w.ground.id, 0]);
+
+      const listed = (await roomsOf(client, { levelId: w.ground.id })).find((entry) => entry.id === kept.roomId);
+      assert.ok(listed, "the room is still listed on its level");
+      assert.equal(listed.areaM2, 0);
+
+      // The room goes too, so the warning of a room that is not enclosed does not stay in the model for the tests after this one.
+      const gone = (await client.call("delete_elements", { ids: [kept.roomId], dryRun: false })) as { committed: boolean };
+      assert.equal(gone.committed, true);
+      assert.deepEqual((await elementsOf(client, { ids: [kept.roomId] })).notFound, [kept.roomId]);
+    });
+  });
+
   // Run last, after a save. A separator from a 3D view closed Revit in the probe of task 1, so nothing in the command touches the
   // active view or passes a view that is not the floor plan of the level, and this checks that a 3D view in the project changes
-  // none of that. No tool switches the view that is open in the Revit window (create_3d_view leaves it as it is), so the 3D
-  // view made here exists but is not the open one, unless a person switched Revit to it by hand. The test says which it was
-  // able to establish. If Revit closes or a dialog comes up, stop: do not run it again, a person has to answer Revit.
-  it("separator works while a 3D view is active", async (t) => {
+  // none of that. It does NOT test an active 3D view: no tool switches the view that is open in the Revit window (create_3d_view
+  // leaves it as it is), so the 3D view made here exists but is not the open one. That case waits for a person to switch Revit to a
+  // 3D view (task 13), and the call is repeated then. If Revit closes or a dialog comes up, stop: do not run it again, a person has
+  // to answer Revit.
+  it("separator is drawn in the floor plan of its level while the project has a 3D view", async (t) => {
     await withClient(async (client) => {
       const w = ready();
       const viewName = `Вид-3D для разделителя ${stamp}`;
@@ -671,7 +700,9 @@ describe("stage 3 live checks: rooms and room separators", { timeout: 180_000 },
       );
 
       assert.ok(line);
-      t.diagnostic(`3D view "${viewName}" (${view.viewId}) exists in the project; no tool made it the open view of Revit, so switch Revit to it by hand to have it active`);
+      t.diagnostic(
+        `The case of an ACTIVE 3D view was NOT exercised. 3D view "${viewName}" (${view.viewId}) exists in the project, but no tool makes it the open view of Revit, and the open view stayed the floor plan. Repeat this call with Revit switched to that view by hand.`,
+      );
       assert.equal(line.actual.levelId, w.ground.id);
       assert.equal((await separatorCount(client)) - lines, 1);
       assert.ok((await modelInfo(client)).views.some((entry) => entry.id === view.viewId && entry.viewType === "ThreeD"), "the 3D view is still there");

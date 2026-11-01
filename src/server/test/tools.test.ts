@@ -894,6 +894,8 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /create_room_separators/);
     assert.match(description, /actual is { name, number, areaM2, perimeterMm }/);
     assert.match(description, /square metres and net of the walls/);
+    assert.match(description, /never a room of area 0/);
+    assert.match(description, /failed with committed true/);
     assert.match(description, /duplicate "Number" values/);
     assert.match(description, /get_elements with rooms/);
 

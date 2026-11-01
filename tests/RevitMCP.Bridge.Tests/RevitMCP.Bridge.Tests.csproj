@@ -18,6 +18,7 @@
     <!-- RevitMCP.Commands needs Revit to compile. These files do not, so their logic can be tested here. -->
     <Compile Include="..\..\src\plugin\RevitMCP.Commands\Revit\UndoHistory.cs" Link="UndoHistory.cs" />
     <Compile Include="..\..\src\plugin\RevitMCP.Commands\Revit\SnapshotRetention.cs" Link="SnapshotRetention.cs" />
+    <Compile Include="..\..\src\plugin\RevitMCP.Commands\Revit\ItemResult.cs" Link="ItemResult.cs" />
     <Compile Include="..\..\src\plugin\RevitMCP.Commands\Dispatch\LogThrottle.cs" Link="LogThrottle.cs" />
   </ItemGroup>
 

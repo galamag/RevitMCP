@@ -841,6 +841,7 @@ export const tools: readonly ToolDefinition[] = [
       "so a kitchen and a living room that share one space need create_room_separators between them first, and then a room in each half. A level that has no floor plan view still takes rooms, as long as walls stand on it. " +
       "actual is { name, number, areaM2, perimeterMm }, read from the model after the commit. areaM2 is in square metres and net of the walls: a box of walls 264 mm thick between axes 10000 x 6000 gives 9736 x 5736, so 55.85. " +
       "perimeterMm is in millimetres, along the faces of the walls. The height of the room is left to Revit and not reported: walls from 1000 to 3000 mm high gave the same area. " +
+      "The area is read once more after the commit, and a created item is never a room of area 0: if Revit leaves a room with none, the item is failed with committed true, the rest of the batch landed, and error names the room, which stays in the model: take it away with delete_elements. Nothing has been seen to do this. " +
       BATCH_RULES +
       " Related tools: create_room_separators, create_walls, get_elements with rooms, get_model_info, delete_elements, undo_last_operation, save_project.",
     inputSchema: {

@@ -37,7 +37,7 @@ public sealed class CreateRoomsCommand : ICommand
             entries,
             input => Build(document, input),
             element => Describe((Room)element),
-            element => EmptyAfterCommit((Room)element));
+            problemAfterCommit: element => EmptyAfterCommit((Room)element));
     }
 
     /// <summary>The name of a room as Revit shows it on a plan, without the number that <c>Element.Name</c> adds.</summary>
@@ -128,11 +128,15 @@ public sealed class CreateRoomsCommand : ICommand
         perimeterMm = Units.InternalToMm(room.Perimeter),
     };
 
-    /// <summary>The room had an area when the transaction was about to end. Revit works on it once more when it commits, so say so if the area is gone.</summary>
-    private static IReadOnlyList<string> EmptyAfterCommit(Room room) =>
+    /// <summary>
+    /// The room had an area when the transaction was about to end. Revit works on it once more when it commits, so a room whose area is gone then
+    /// is not a room that landed: <see cref="ItemBatch"/> fails the item, and it names the room, which stays in the model with an area of 0.
+    /// Nothing is known to leave a room like that, but the check stays: a created room with an area of 0 must never be reported.
+    /// </summary>
+    private static string? EmptyAfterCommit(Room room) =>
         room.Area > 0
-            ? []
-            : [$"Room {room.Id} has an area of 0 after the commit, though it had one inside the transaction, so it encloses nothing now. Look at it with get_elements and rooms."];
+            ? null
+            : "The room has an area of 0 after the commit, though it had one inside the transaction, so it encloses nothing now.";
 
     private static string Format(PlanPointMm point) => $"({Units.FormatNumber(point.X)}, {Units.FormatNumber(point.Y)})";
 

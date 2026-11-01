@@ -2,25 +2,6 @@ using System.Text.Json;
 
 namespace RevitMCP.Commands;
 
-/// <summary>The values of <see cref="ItemResult.Status"/>.</summary>
-public static class ItemStatus
-{
-    public const string Created = "created";
-    public const string AlreadyExisted = "already_existed";
-    public const string Failed = "failed";
-    public const string RolledBack = "rolled_back";
-}
-
-/// <summary>The report on one requested item. <see cref="ElementId"/> is a string, like every ID in the contract.</summary>
-public sealed record ItemResult(
-    int Index,
-    string Status,
-    string? ElementId,
-    JsonElement? Requested,
-    JsonElement? Actual,
-    IReadOnlyList<string> Warnings,
-    string? Error);
-
 /// <summary>The per-item report of one batch. A batch is one transaction: all of it lands, or none of it.</summary>
 public sealed class BatchResult
 {
