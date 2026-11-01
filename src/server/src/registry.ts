@@ -529,7 +529,7 @@ export const tools: readonly ToolDefinition[] = [
       "and an outline that crosses or touches itself, or encloses no area, is refused. Take typeId from list_types with ceilings and levelId from get_model_info. " +
       "heightOffsetMm is required, and there is no default: it is the height of the underside of the ceiling above its level, in millimetres, and negative is below the level. " +
       "Revit puts a new ceiling 2600 mm above its level whatever the height of the storey, so this tool always writes the height you give, and fails the item if the ceiling does not have it once Revit has built it. " +
-      "The height of the outline itself changes nothing. The thickness of the type goes up from the underside, and a basic ceiling type has none. " +
+      "The thickness of the type goes up from the underside, and a basic ceiling type has none. " +
       "actual is { areaM2, heightOffsetMm, typeId, levelId, boundingBoxMm }: areaM2 is in square metres, heightOffsetMm is read back from the ceiling, " +
       "and boundingBoxMm is { min, max } in millimetres in model coordinates, so min.z is the underside: the elevation of the level plus heightOffsetMm. " +
       BATCH_RULES +
@@ -553,10 +553,13 @@ export const tools: readonly ToolDefinition[] = [
       "Cuts openings through floors of the active project, as for a stair or a shaft, one outline of straight edges for each. floorId is the id of a floor, from create_floors or from get_elements with floors. " +
       "boundaryMm lists the corners of the opening in millimetres in model coordinates, in either direction. The outline closes by itself from the last point to the " +
       `first, so do not repeat the first point: equal neighbouring points are refused. It needs at least ${MIN_OUTLINE_POINTS} points, ` +
-      "and an outline that crosses or touches itself, or encloses no area, is refused. The cut goes straight down through the whole floor, so the height of the outline does not matter. " +
+      "and an outline that crosses or touches itself, or encloses no area, is refused. The cut goes straight down through the whole floor. " +
       "An opening may reach across the edge of the floor: it cuts what overlaps. An opening that cuts nothing, because it lies wholly outside the floor or inside an opening cut before it, " +
       "is accepted by Revit with no error, only a warning, so this tool reads the area of the floor before and after each opening, and an opening that takes no area off the floor fails its item: " +
       "the batch stops there and nothing lands, and error gives the two areas. The openings of a list are cut in order, so the same floor may appear in several items, and each one sees the area the earlier ones left. " +
+      "An opening that covers the whole floor lands as created and leaves the floor with an area of 0, so read areaAfterM2: nothing is left of that floor, but it stays in the model as an element, and get_elements still gives it the box it had. " +
+      "Revit adds the warning Opening not cutting anything for it, which is wrong there, and a later opening on such a floor fails, as it cuts nothing. " +
+      "An opening that a later one in the same list encloses stays in the model with the status created, and the later one cuts only what was left of the floor, so areaAfterM2 of the earlier item is not the area of the floor at the end: floorAreaAfterCallM2 is. " +
       "actual is { floorId, areaBeforeM2, areaAfterM2, cutM2, floorAreaAfterCallM2, boundaryMm }: the first two areas are the area of the floor in square metres, read from the model, just before and just after this opening, and cutM2 is the difference. " +
       "floorAreaAfterCallM2 is the area of the floor after the whole call, so it differs from areaAfterM2 when a later item cut the same floor. " +
       "boundaryMm lists the start of each edge of the opening as Revit keeps it, as { x, y } in millimetres, and it is null if Revit keeps the opening as a plain rectangle, which it did not for a rectangular outline. elementId is the id of the opening, which is an element of its own. " +
@@ -578,7 +581,7 @@ export const tools: readonly ToolDefinition[] = [
       "The outline closes by itself from the last point to the " +
       `first, so do not repeat the first point: equal neighbouring points are refused. It needs at least ${MIN_OUTLINE_POINTS} points, ` +
       "and an outline that crosses or touches itself, or encloses no area, is refused. Take typeId from list_types with toposolid, whose names are Russian and in the template end with the thickness, and levelId from get_model_info. " +
-      "topOffsetMm is required: it is the height of the top surface of the ground above the level, in millimetres, and negative is below the level. The thickness of the type goes down from the top, and the height of the outline itself changes nothing. " +
+      "topOffsetMm is required: it is the height of the top surface of the ground above the level, in millimetres, and negative is below the level. The thickness of the type goes down from the top. " +
       "Put the top of the ground below the underside of every floor it reaches: a floor lies with its top on its level and its thickness below, so under a floor 300 mm thick on the level a top of -400 is clear. " +
       "A ground whose top is higher overlaps the floor, and Revit keeps the warning Highlighted toposolid and floor overlap. The tool does not refuse that and does not hide it: the call lands and the warning comes back in warnings, " +
       "so read warnings after every call, and get_warnings keeps listing it, with the ids of the ground and the floor. " +

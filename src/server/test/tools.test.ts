@@ -586,6 +586,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /2600/);
     assert.match(description, /underside/);
     assert.match(description, /list_types with ceilings/);
+    assert.doesNotMatch(description, /height of the outline/, "the outline has no height to give");
   });
 
   it("tells the model the truth about create_floor_openings", async (t) => {
@@ -604,6 +605,9 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /takes no area off the floor fails its item/);
     assert.match(description, /same floor may appear in several items/);
     assert.match(description, /floorAreaAfterCallM2/);
+    assert.match(description, /covers the whole floor lands as created and leaves the floor with an area of 0/);
+    assert.match(description, /Revit adds the warning Opening not cutting anything for it, which is wrong there/);
+    assert.match(description, /encloses stays in the model with the status created/);
   });
 
   it("tells the model the truth about create_ground", async (t) => {
@@ -623,6 +627,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /below the underside of every floor it reaches/);
     assert.match(description, /toposolid and floor overlap/);
     assert.match(description, /does not refuse that and does not hide it/);
+    assert.doesNotMatch(description, /height of the outline/, "the outline has no height to give");
   });
 
   it("passes attachments unchanged and returns the honest result", async (t) => {

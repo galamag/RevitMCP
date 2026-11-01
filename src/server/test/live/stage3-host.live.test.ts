@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { describe, it, type TestContext } from "node:test";
+import { describe, it } from "node:test";
 
 import { checkCanClose } from "../../src/cli/closeRule.ts";
 import { BridgeClient } from "../../src/client.ts";
 import { defaultConnectionPath } from "../../src/connection.ts";
 import { BridgeRpcError } from "../../src/errors.ts";
-import { UndoNotConfirmedError, undoLastOperation, type UndoResult } from "../../src/undo.ts";
 import { boundsOfBand, decodePng, reportColours, reportHues, type Band, type Pixels, type PixelBox, type Region } from "../pngPixels.ts";
+import { undoWithOneRetry } from "../undoRetry.ts";
 
 // These tests need a running Revit with the RevitMCP plugin loaded. Each run creates one new project in the test folder
 // and leaves it open and saved. The model is judged two ways. Numbers come from the model after the commit, and the pixels
@@ -73,6 +73,8 @@ interface ElementRow {
   category: string | null;
   levelId: string | null;
   boundingBoxMm: Box | null;
+  /** The real top of a wall, read from its shape. */
+  topMm?: number | null;
 }
 
 interface ElementsAnswer {
@@ -118,6 +120,7 @@ interface FloorActual {
 interface WallActual {
   baseOffsetMm: number;
   heightMm: number;
+  widthMm: number;
 }
 
 interface Rect {
@@ -158,9 +161,6 @@ const WALL_HEIGHT_MM = 3400;
 const SNAPSHOT_WIDTH_PX = 1200;
 const SCENE_PITCH_MM = 150000;
 
-/** The undo tool refuses to post a second undo until a minute after an unconfirmed one, so that two never overlap. */
-const UNDO_SETTLE_MS = 61_000;
-
 /** A coloured region counts as showing a colour when almost all of its coloured pixels are of that band. */
 const MIN_BAND_SHARE = 0.95;
 /** Red is flat and fills its region. */
@@ -170,14 +170,39 @@ const GRASS_FROM_DEG = 55;
 const GRASS_TO_DEG = 110;
 /** The grass has pale specks, which are not coloured, so it fills less of a region. Measured 0.89 to 1. */
 const MIN_GRASS_COLOURED = 0.7;
-/**
- * Measured on controls, the same house with the ground top at 0, at -400 and at -2400: the wall of 3400 mm fills 129, 145 and 145 rows at 30 m.
- * So the rows tell a ground that covers the foot of the wall from one that does not. They do not tell a ground at -2400, which is 2000
- * below the foot, from the right one, as the camera looks under the house at ground that lies behind it: that is checked in the model.
+
+/*
+ * The picture of the house, from the south at eye height, and what each check on it catches. Measured on controls: the same house with
+ * the ground top at 0, at -400, which is right, and at -2400.
+ *
+ * - The wall rows: 129, 145 and 145 rows at 30 m. They catch a ground that covers the foot of the wall (top 0), and nothing lower.
+ * - Grass under the foot and in front of the house: grass in all three. They catch a ground that is missing or does not reach the
+ *   house, and say nothing of its height.
+ * - Grass beside the house at the height of its foot: grass at 0 and at -400, and not at -2400, where the coloured share is 0.15. That is
+ *   incidental: it fails because the far edge of the ground, at row 521, lies below the rows that are looked at. It is not relied on.
+ * - The far edge of the ground. The camera looks level, so a row below the horizon is a height at a distance, and the first grass row
+ *   beside the house is the far edge of the ground at a distance that the scene sets: 70 m. One row is 55 mm of height there. The check
+ *   turns that row back into the top of the ground, and wants it at the foot of the wall: rows 477, 485 and 521 for 0, -400 and -2400,
+ *   read back as 18, -420 and -2396 mm. This is a check of the top of the ground, but only because the scene puts the far edge in frame.
+ *   A ground that reached the horizon would show no edge, and the check would fail instead of passing, as it asks for an edge below it.
+ *   Its limits: one row is 55 mm, so the tolerance of 200 mm is the finest it can be; it reads the far edge of the top face and says
+ *   nothing of the thickness below; and it trusts the far edge of the ground to lie where the scene put it.
  */
+/** 140 rows at least: the wall of 3400 mm fills 145, and a ground with its top at 0 covers 400 mm of it and leaves 129. */
 const MIN_WALL_ROWS = 140;
 /** The wall base and the ground meet: the first rows under the wall are ground, within this many rows. */
 const CONTACT_ROWS = 8;
+const EYE_HEIGHT_MM = 1500;
+const EYE_DISTANCE_MM = 30000;
+/** How far the meadow of a house reaches north of its wall, and so how far its far edge is from the eye: this and EYE_DISTANCE_MM. */
+const GROUND_REACH_MM = 40000;
+/** The top of the ground, as the far edge shows it, may differ from the foot of the wall by this much: 3.6 rows, and the measured error is under 1. */
+const GROUND_TOP_TOLERANCE_MM = 200;
+/** The far edge has to lie this many rows below the horizon, or it is the horizon that was found. */
+const MIN_ROWS_BELOW_HORIZON = 5;
+/** Grass rows of the far edge: this many in a row, each at least half coloured. Pale specks are not coloured. */
+const EDGE_CONFIRM_ROWS = 6;
+const EDGE_MIN_COLOURED = 0.5;
 
 const stamp = new Date().toTimeString().slice(0, 8).replaceAll(":", "");
 const name = `проверка-этап3-проёмы-${stamp}`;
@@ -273,34 +298,6 @@ async function saved(client: BridgeClient): Promise<void> {
   assert.equal(await isModified(client), false);
 }
 
-/**
- * Undoes the last operation. Revit itself now and then refuses the Undo that was posted to it: its journal says `API queue
- * command ID_BUTTON_UNDO cannot be invoked in this context`, and the tool answers `Not undone`, with the model as it was.
- * It came in windows of time and for every tool tried, also in the stage 2 undo tests, and the cause is not known. So this
- * posts the undo once more after the minute the tool asks for. Before it does, it asks what became of the first post, as an
- * undo that ran late must not be posted again. The retry is written to the result of the test.
- */
-async function undoWithOneRetry(t: TestContext, client: BridgeClient): Promise<UndoResult> {
-  try {
-    return await undoLastOperation(client);
-  } catch (error) {
-    if (!(error instanceof UndoNotConfirmedError) || !error.message.startsWith("Not undone")) {
-      throw error;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, UNDO_SETTLE_MS));
-    const first = (await client.call("get_last_undo_result", {})) as UndoResult;
-    t.diagnostic(`Revit did not run the posted undo of ${String(first.transactionName)}; a minute later get_last_undo_result says ${first.state}, so ${first.state === "undone" ? "it is not posted again" : "it is posted again"}`);
-
-    if (first.state === "undone") {
-      return first;
-    }
-    assert.equal(first.state, "not_confirmed", `an undo that is neither confirmed nor undone must not be posted again: ${JSON.stringify(first)}`);
-
-    return undoLastOperation(client);
-  }
-}
-
 /** A floor of the given type on the ground level, which stands for one scene. */
 async function makeFloor(client: BridgeClient, rect: Rect, typeId: string): Promise<{ id: string; actual: FloorActual }> {
   const batch = (await client.call("create_floors", {
@@ -383,13 +380,174 @@ function assertShows(pixels: Pixels, region: Region, expected: Band, what: strin
   assert.ok(report.coloured / report.pixels >= minColoured, `${what}: only ${report.coloured} of ${report.pixels} pixels are coloured`);
 }
 
-/** Asserts that a region of a picture shows the meadow: nearly all of what is coloured in it has the hue of its grass. */
-function assertGrass(pixels: Pixels, region: Region, what: string): void {
-  const report = reportHues(pixels, GRASS_FROM_DEG, GRASS_TO_DEG, region);
-  console.log(`# ${what}: expected grass, ${report.coloured} of ${report.pixels} pixels coloured, ${report.share} of them grass`);
+interface Measured {
+  ok: boolean;
+  detail: string;
+}
 
-  assert.ok(report.share >= MIN_BAND_SHARE, `${what}: only ${report.share} of the colour is grass`);
-  assert.ok(report.coloured / report.pixels >= MIN_GRASS_COLOURED, `${what}: only ${report.coloured} of ${report.pixels} pixels are coloured`);
+/** Measures whether a region of a picture shows the meadow: nearly all of what is coloured in it has the hue of its grass. */
+function measureGrass(pixels: Pixels, region: Region, minColoured = MIN_GRASS_COLOURED): Measured {
+  const report = reportHues(pixels, GRASS_FROM_DEG, GRASS_TO_DEG, region);
+  const filled = report.coloured / report.pixels;
+
+  return {
+    ok: report.share >= MIN_BAND_SHARE && filled >= minColoured,
+    detail: `${report.coloured} of ${report.pixels} pixels coloured (${filled.toFixed(2)}), ${report.share.toFixed(3)} of them grass`,
+  };
+}
+
+/** Asserts that a region of a picture shows the meadow, and logs what it measured. */
+function assertGrass(pixels: Pixels, region: Region, what: string): void {
+  const measured = measureGrass(pixels, region);
+  console.log(`# ${what}: expected grass, ${measured.detail}`);
+
+  assert.ok(measured.ok, `${what}: ${measured.detail}`);
+}
+
+/** The first row, from the top, where the columns hold grass for EDGE_CONFIRM_ROWS rows in a row, or null. */
+function firstGrassRow(pixels: Pixels, left: number, right: number): number | null {
+  let run = 0;
+
+  for (let y = 0; y < pixels.height; y++) {
+    // A quarter row in from each edge, so that the region is exactly this row whatever the rounding of the fractions.
+    const row = { left, right, top: (y + 0.25) / pixels.height, bottom: (y + 0.75) / pixels.height };
+    run = measureGrass(pixels, row, EDGE_MIN_COLOURED).ok ? run + 1 : 0;
+
+    if (run === EDGE_CONFIRM_ROWS) {
+      return y - EDGE_CONFIRM_ROWS + 1;
+    }
+  }
+
+  return null;
+}
+
+/** What the model says of a house and its camera, for what the picture of it has to show. */
+interface HouseScene {
+  /** The foot and the top of its walls, read from the model, in millimetres in model coordinates. */
+  footMm: number;
+  topMm: number;
+  /** Along the line of sight, from the eye to the outer face of the front wall, and to the far edge of the ground. */
+  frontMm: number;
+  farMm: number;
+}
+
+interface Check {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+const CHECK = {
+  wallRows: "the ground does not cover the foot of the wall",
+  underFoot: "grass right under the foot of the wall",
+  inFront: "grass in front of the house",
+  besideLeft: "grass left of the house at the height of its foot",
+  besideRight: "grass right of the house at the height of its foot",
+  farEdge: "the top of the ground, read from its far edge, is the foot of the wall",
+} as const;
+
+/** The checks on the picture of a house from the south. They are listed by name, so that a control can say which of them a wrong ground fails. */
+function houseChecks(south: Pixels, scene: HouseScene): Check[] {
+  const house = boundsOfBand(south, "red");
+  assert.ok(house && house.count > 20000, `the house should be the red part of the picture: ${JSON.stringify(house)}`);
+
+  const rows = house.bottom - house.top + 1;
+  const columns = { left: house.left / south.width, right: (house.right + 1) / south.width };
+  const row = (from: number, to: number): { top: number; bottom: number } => ({ top: from / south.height, bottom: to / south.height });
+  const grass = (name: string, region: Region): Check => ({ name, ...measureGrass(south, region) });
+  const beside = row(house.bottom - 30, house.bottom - 5);
+
+  // The scale of the picture, from the top edge of the wall, which no ground can cover. The line of sight is level, so that edge lies
+  // (top of the wall - eye) above the horizon, at the distance of the front face.
+  const horizon = south.height / 2;
+  const focalPx = ((horizon - house.top) * scene.frontMm) / (scene.topMm - EYE_HEIGHT_MM);
+  const topFromRow = (edgeRow: number): number => EYE_HEIGHT_MM - ((edgeRow - horizon) * scene.farMm) / focalPx;
+
+  const edges = [["left", 0.1, 0.25], ["right", 0.75, 0.9]] as const;
+  const found = edges.map(([side, left, right]) => ({ side, row: firstGrassRow(south, left, right) }));
+  const tops = found.map((edge) => (edge.row === null ? null : topFromRow(edge.row)));
+  const farEdgeOk = found.every((edge, index) => {
+    const top = tops[index];
+    return edge.row !== null && edge.row >= horizon + MIN_ROWS_BELOW_HORIZON && typeof top === "number" && Math.abs(top - scene.footMm) <= GROUND_TOP_TOLERANCE_MM;
+  });
+
+  return [
+    { name: CHECK.wallRows, ok: rows >= MIN_WALL_ROWS, detail: `the wall fills ${rows} rows, ${MIN_WALL_ROWS} at least` },
+    grass(CHECK.underFoot, { ...columns, ...row(house.bottom + 1, house.bottom + CONTACT_ROWS) }),
+    grass(CHECK.inFront, { ...columns, ...row(house.bottom + CONTACT_ROWS + 1, south.height) }),
+    grass(CHECK.besideLeft, { left: 0.02, right: (house.left - 20) / south.width, ...beside }),
+    grass(CHECK.besideRight, { left: (house.right + 20) / south.width, right: 0.98, ...beside }),
+    {
+      name: CHECK.farEdge,
+      ok: farEdgeOk,
+      detail:
+        `first grass row ${found.map((edge) => `${edge.side} ${String(edge.row)}`).join(", ")} against the horizon at ${horizon}, which reads as the top of the ground at ` +
+        `${tops.map((top) => (top === null ? "none" : `${top.toFixed(0)} mm`)).join(", ")}, and the foot of the wall is at ${scene.footMm} mm, within ${GROUND_TOP_TOLERANCE_MM}`,
+    },
+  ];
+}
+
+/** A house, a scene of its own, and the picture of it from the south. */
+interface House {
+  walls: Array<{ id: string; actual: WallActual }>;
+  /** The foot of each wall, from the model. */
+  feet: number[];
+  groundBatch: Batch<GroundActual>;
+  groundTopMm: number;
+  south: Pixels;
+  scene: HouseScene;
+}
+
+/**
+ * Four red walls 3400 high that start at the foot of the ground at -400, a red floor inside them, and meadow around with its top at
+ * `groundTopMm`, which is the thing that varies. The camera stands 30 m south at the height of 1500 and looks north, level.
+ */
+async function buildHouse(client: BridgeClient, title: string, groundTopMm: number): Promise<House> {
+  const w = ready();
+  const y = scene();
+  const footprint: Rect = { x0: 0, y0: y, x1: 10000, y1: y + 8000 };
+  const corners = rectangle(footprint);
+
+  const walls = created(
+    (await client.call("create_walls", {
+      items: corners.map((start, index) => ({
+        startMm: start,
+        endMm: corners[(index + 1) % corners.length],
+        typeId: w.redWall,
+        levelId: w.ground.id,
+        heightMm: WALL_HEIGHT_MM,
+        baseOffsetMm: WALL_BASE_MM,
+      })),
+    })) as Batch<WallActual>,
+  );
+  await makeFloor(client, footprint, w.redFloor);
+  const groundBatch = await grounds(client, [
+    { boundaryMm: rectangle({ x0: -25000, y0: y - GROUND_REACH_MM, x1: 35000, y1: y + GROUND_REACH_MM }), levelId: w.ground.id, topOffsetMm: groundTopMm, typeId: w.meadow.id },
+  ]);
+  const groundTopMeasured = groundBatch.items[0]?.actual?.boundingBoxMm?.max.z;
+
+  const walled = await elementsOf(client, walls.map((wall) => wall.id));
+  assert.deepEqual(walled.notFound, []);
+  const feet = walled.elements.map((wall) => wall.boundingBoxMm?.min.z as number);
+  const tops = walled.elements.map((wall) => wall.topMm as number);
+  assert.ok(tops.every((top) => Math.abs(top - tops[0]!) < NEAR_MM), `the walls have one top: ${JSON.stringify(tops)}`);
+
+  const eye = { x: 5000, y: y - EYE_DISTANCE_MM, z: EYE_HEIGHT_MM };
+  const south = await snapshot(client, title, eye, { x: 5000, y, z: EYE_HEIGHT_MM });
+
+  return {
+    walls,
+    feet,
+    groundBatch,
+    groundTopMm: groundTopMeasured as number,
+    south,
+    scene: {
+      footMm: feet[0]!,
+      topMm: tops[0]!,
+      frontMm: EYE_DISTANCE_MM - walls[0]!.actual.widthMm / 2,
+      farMm: EYE_DISTANCE_MM + GROUND_REACH_MM,
+    },
+  };
 }
 
 describe("stage 3 live checks: ceilings, floor openings and ground", { timeout: 900_000 }, () => {
@@ -508,13 +666,6 @@ describe("stage 3 live checks: ceilings, floor openings and ground", { timeout: 
           assert.ok(thickness > 0, `${entry.what}: a compound ceiling has a thickness, not ${thickness}`);
         }
       }
-
-      // The height of the outline moves nothing: the same ceiling, drawn on the level, comes out at the same height.
-      const other = { x0: 40000, y0: y, x1: 45000, y1: y + 4000 };
-      const [again] = created(await ceilings(client, [{ boundaryMm: rectangle(other), typeId: w.basicCeiling.id, levelId: w.upper.id, heightOffsetMm: 2350.5 }]));
-      assert.ok(again);
-      assertNear(again.actual.boundingBoxMm?.min.z, UPPER_LEVEL_MM + 2350.5, "a second ceiling at the same offset");
-      w.ceilingIds.push(again.id);
     });
   });
 
@@ -581,7 +732,9 @@ describe("stage 3 live checks: ceilings, floor openings and ground", { timeout: 
       assertShows(after, planRegion(whole, control), "red", "after: the rest of the floor");
       const outline = boundsOfBand(after, "red");
       assert.ok(outline);
-      assert.ok(Math.abs(outline.left - whole.box.left) <= 2 && Math.abs(outline.top - whole.box.top) <= 2 && Math.abs(outline.right - whole.box.right) <= 2, "the floor is where it was");
+      for (const edge of ["left", "top", "right", "bottom"] as const) {
+        assert.ok(Math.abs(outline[edge] - whole.box[edge]) <= 2, `the ${edge} edge of the floor is where it was: ${outline[edge]} against ${whole.box[edge]}`);
+      }
       const grassBeside = planRegion(whole, { x0: -7000, y0: floorRect.y0, x1: -1000, y1: floorRect.y1 });
       assertGrass(after, grassBeside, "after: the ground beside the floor");
     });
@@ -618,8 +771,11 @@ describe("stage 3 live checks: ceilings, floor openings and ground", { timeout: 
       assert.equal(failed.items[0]?.elementId, null);
       assert.equal(failed.items[1]?.elementId, null);
       assert.equal(failed.items[1]?.actual, null);
+      // The item before it had cut a square metre by then, so the floor had this much when the outside opening was cut, and still has it.
+      const areaThen = String(Math.round((areaNow - areaOf(next)) * 1000) / 1000);
       assert.match(failed.items[1]?.error ?? "", /cut nothing/);
       assert.ok(failed.items[1]?.error?.includes(floor.id), "the error names the floor");
+      assert.ok(failed.items[1]?.error?.includes(`has ${areaThen} m² after it, and had ${areaThen} m² before`), `the error names both areas, ${areaThen} m²: ${String(failed.items[1]?.error)}`);
       assert.ok(failed.errors.some((text) => /Item 1 failed, so nothing landed/.test(text)), JSON.stringify(failed.errors));
       assert.deepEqual(failed.dialogs, []);
 
@@ -632,15 +788,32 @@ describe("stage 3 live checks: ceilings, floor openings and ground", { timeout: 
       assertNear(again.actual.areaBeforeM2, areaNow, "the floor starts from the area it had", NEAR_M2);
       assertNear(again.actual.floorAreaAfterCallM2, areaNow - areaOf(next), "area after the opening that was rolled back before", NEAR_M2);
 
-      // An opening inside one cut before it cuts nothing either, and fails the same way, whatever the order of the list.
+      // An opening inside one cut before it in the same list cuts nothing either, and fails the same way. The other order is below.
+      const small: Rect = { x0: 4500, y0: y + 2500, x1: 5500, y1: y + 3500 };
+      const large: Rect = { x0: 4200, y0: y + 2200, x1: 5800, y1: y + 3800 };
       const twice = await openings(client, [
-        { floorId: floor.id, boundaryMm: rectangle({ x0: 4500, y0: y + 2500, x1: 5500, y1: y + 3500 }) },
-        { floorId: floor.id, boundaryMm: rectangle({ x0: 4700, y0: y + 2700, x1: 5300, y1: y + 3300 }) },
+        { floorId: floor.id, boundaryMm: rectangle(large) },
+        { floorId: floor.id, boundaryMm: rectangle(small) },
       ]);
       assert.equal(twice.committed, false);
       assert.deepEqual(twice.items.map((item) => item.status), ["rolled_back", "failed"]);
       assert.match(twice.items[1]?.error ?? "", /inside an opening cut before it/);
       assert.equal(countOf(await modelInfo(client), "OST_FloorOpening"), countOf(infoAfter, "OST_FloorOpening") + 1, "the batches that failed left no opening, and the call that landed added one");
+
+      // The other order lands: a large opening after a small one that it encloses. Revit takes both, the small one stays in the model with
+      // the status created, and the large one cuts only what the small one left. Nothing says that the small one now adds nothing.
+      const floorAreaNow = areaNow - areaOf(next);
+      const enclosing = created(await openings(client, [{ floorId: floor.id, boundaryMm: rectangle(small) }, { floorId: floor.id, boundaryMm: rectangle(large) }]));
+      console.log(`# an opening that encloses one cut before it: ${JSON.stringify(enclosing.map((entry) => ({ ...entry.actual, boundaryMm: undefined })))}`);
+      assertNear(enclosing[0]?.actual.areaBeforeM2, floorAreaNow, "area before the small opening", NEAR_M2);
+      assertNear(enclosing[0]?.actual.cutM2, areaOf(small), "the small opening cuts its own area", NEAR_M2);
+      assertNear(enclosing[1]?.actual.areaBeforeM2, floorAreaNow - areaOf(small), "the large opening starts from what the small one left", NEAR_M2);
+      assertNear(enclosing[1]?.actual.cutM2, areaOf(large) - areaOf(small), "the large opening cuts only what the small one left", NEAR_M2);
+      for (const entry of enclosing) {
+        assertNear(entry.actual.floorAreaAfterCallM2, floorAreaNow - areaOf(large), "the floor after the call has lost the large opening, and no more", NEAR_M2);
+      }
+      assert.deepEqual((await elementsOf(client, enclosing.map((entry) => entry.id))).notFound, [], "both openings are in the model");
+      assert.equal(countOf(await modelInfo(client), "OST_FloorOpening"), countOf(infoAfter, "OST_FloorOpening") + 3);
     });
   });
 
@@ -745,58 +918,119 @@ describe("stage 3 live checks: ceilings, floor openings and ground", { timeout: 
 
   it("house stands on the ground in a snapshot", async () => {
     await withClient(async (client) => {
-      const w = ready();
-      const y = scene();
-      const footprint: Rect = { x0: 0, y0: y, x1: 10000, y1: y + 8000 };
-      const corners = rectangle(footprint);
+      const house = await buildHouse(client, "дом-на-земле", WALL_BASE_MM);
+      assertLanded(house.groundBatch);
 
-      // Four red walls that reach down to the top of the ground, a red floor inside them and meadow around, 400 below the level.
-      const walls = (await client.call("create_walls", {
-        items: corners.map((start, index) => ({
-          startMm: start,
-          endMm: corners[(index + 1) % corners.length],
-          typeId: w.redWall,
-          levelId: w.ground.id,
-          heightMm: WALL_HEIGHT_MM,
-          baseOffsetMm: WALL_BASE_MM,
-        })),
-      })) as Batch<WallActual>;
-      const madeWalls = created(walls);
-      await makeFloor(client, footprint, w.redFloor);
-      const [meadow] = created(
-        await grounds(client, [{ boundaryMm: rectangle({ x0: -25000, y0: y - 40000, x1: 35000, y1: y + 40000 }), levelId: w.ground.id, topOffsetMm: -400, typeId: w.meadow.id }]),
-      );
-      assert.ok(meadow);
-
-      // In the model, the feet of the walls and the top of the ground are one height. A picture cannot show that: see MIN_WALL_ROWS.
-      const walled = await elementsOf(client, madeWalls.map((wall) => wall.id));
-      assert.deepEqual(walled.notFound, []);
-      const feet = walled.elements.map((wall) => wall.boundingBoxMm?.min.z);
-      const groundTop = meadow.actual.boundingBoxMm?.max.z;
-      console.log(`# feet of the walls ${JSON.stringify(feet)}, top of the ground ${String(groundTop)}`);
-      for (const foot of feet) {
+      // In the model, the feet of the walls and the top of the ground are one height.
+      console.log(`# feet of the walls ${JSON.stringify(house.feet)}, top of the ground ${String(house.groundTopMm)}`);
+      for (const foot of house.feet) {
         assertNear(foot, WALL_BASE_MM, "the foot of a wall");
-        assertNear(foot, groundTop as number, "the foot of the wall against the top of the ground");
+        assertNear(foot, house.groundTopMm, "the foot of the wall against the top of the ground");
       }
 
-      // From the south, level with the middle of the house: red wall above, grass under it and on both sides of it.
-      const south = await snapshot(client, "дом-на-земле", { x: 5000, y: y - 30000, z: 1500 }, { x: 5000, y, z: 1500 });
-      const house = boundsOfBand(south, "red");
-      assert.ok(house && house.count > 20000, `the house should be the red part of the picture: ${JSON.stringify(house)}`);
-      const rows = house.bottom - house.top + 1;
-      console.log(`# the house in the picture: ${JSON.stringify(house)}, ${rows} rows`);
-      assert.ok(rows >= MIN_WALL_ROWS, `the wall shows ${rows} rows, and the ground should not cover its foot: ${MIN_WALL_ROWS} at least`);
+      // In the picture: the checks of houseChecks, each of which is told apart from the others by what its controls do (see below).
+      const checks = houseChecks(house.south, house.scene);
+      for (const check of checks) {
+        console.log(`# ${check.ok ? "passes" : "FAILS"}: ${check.name}: ${check.detail}`);
+      }
+      assert.deepEqual(
+        checks.filter((check) => !check.ok).map((check) => `${check.name}: ${check.detail}`),
+        [],
+      );
+    });
+  });
 
-      const columns = { left: house.left / south.width, right: (house.right + 1) / south.width };
-      const row = (from: number, to: number): { top: number; bottom: number } => ({ top: from / south.height, bottom: to / south.height });
-      assertGrass(south, { ...columns, ...row(house.bottom + 1, house.bottom + CONTACT_ROWS) }, "the ground right under the foot of the wall");
-      assertGrass(south, { ...columns, ...row(house.bottom + CONTACT_ROWS + 1, south.height) }, "the ground in front of the house");
-      assertGrass(south, { left: 0.02, right: (house.left - 20) / south.width, ...row(house.bottom - 30, house.bottom - 5) }, "the ground to the left of the house, at the height of its foot");
-      assertGrass(south, { left: (house.right + 20) / south.width, right: 0.98, ...row(house.bottom - 30, house.bottom - 5) }, "the ground to the right of the house, at the height of its foot");
+  it("a ground at the wrong height fails the picture of the house, and the far edge is what tells them apart", async () => {
+    await withClient(async (client) => {
+      // The same house with the ground top at 0, where the ground covers the foot of the wall and overlaps the floor, and at -2400, which
+      // is 2000 below the foot. The failing checks are pinned as measured: scenes and camera are the same on every run, so are the pixels.
+      const controls: Array<[string, number, string[]]> = [
+        ["дом-земля-0", 0, [CHECK.wallRows, CHECK.farEdge]],
+        ["дом-земля-минус-2400", -2400, [CHECK.besideLeft, CHECK.besideRight, CHECK.farEdge]],
+      ];
 
-      // Above the wall there is no ground: it does not rise over the house.
-      const above = reportHues(south, GRASS_FROM_DEG, GRASS_TO_DEG, { ...columns, ...row(house.top - 40, house.top - 5) });
-      assert.equal(above.inRange, 0, "no grass above the roof line of the house");
+      for (const [title, groundTop, expected] of controls) {
+        const house = await buildHouse(client, title, groundTop);
+        assertNear(house.groundTopMm, groundTop, `${title}: the top of the ground in the model`);
+        assertNear(house.feet[0], WALL_BASE_MM, `${title}: the foot of the wall`);
+        assert.equal(house.groundBatch.committed, true, JSON.stringify(house.groundBatch));
+        assert.equal(house.groundBatch.items[0]?.status, "created");
+
+        // Revit holds that ground at 0 overlaps the floor, and says so. The one at -2400 gives nothing to warn of.
+        if (groundTop === 0) {
+          assert.equal(house.groundBatch.warnings.length, 1, JSON.stringify(house.groundBatch.warnings));
+          assert.match(house.groundBatch.warnings[0] ?? "", /toposolid and floor overlap/);
+        } else {
+          assert.deepEqual(house.groundBatch.warnings, []);
+        }
+
+        const checks = houseChecks(house.south, house.scene);
+        for (const check of checks) {
+          console.log(`# ${title}: ${check.ok ? "passes" : "FAILS"}: ${check.name}: ${check.detail}`);
+        }
+        assert.deepEqual(
+          checks.filter((check) => !check.ok).map((check) => check.name),
+          expected,
+          `${title}: the checks that fail`,
+        );
+      }
+    });
+  });
+
+  it("an opening over the whole floor lands and leaves nothing of the floor, while Revit warns that it cuts nothing", async () => {
+    await withClient(async (client) => {
+      const w = ready();
+      const y = scene();
+      const floorRect: Rect = { x0: 0, y0: y, x1: 10000, y1: y + 8000 };
+      const floor = await makeFloor(client, floorRect, w.redFloor);
+      created(await grounds(client, [{ boundaryMm: rectangle({ x0: -25000, y0: y - 25000, x1: 35000, y1: y + 35000 }), levelId: w.ground.id, topOffsetMm: -400, typeId: w.meadow.id }]));
+      const whole = frameOf(await fromAbove(client, "всё-до", floorRect), floorRect);
+
+      // An outline larger than the floor on every side. Pinned as Revit does it today, and the answer of the tool is true to the model:
+      // the area is 0, and the opening is there. What is wrong is Revit's warning, which says that the opening cuts nothing.
+      const over: Rect = { x0: -1000, y0: y - 1000, x1: 11000, y1: y + 9000 };
+      const batch = await openings(client, [{ floorId: floor.id, boundaryMm: rectangle(over) }]);
+      console.log(`# an opening over the whole floor: ${JSON.stringify({ ...batch, items: batch.items.map((item) => ({ ...item, actual: item.actual && { ...item.actual, boundaryMm: undefined } })) })}`);
+      assert.equal(batch.committed, true, JSON.stringify(batch));
+      assert.deepEqual(batch.errors, []);
+      assert.deepEqual(batch.dialogs, []);
+      assert.equal(batch.items[0]?.status, "created");
+      assertNear(batch.items[0]?.actual?.areaBeforeM2, areaOf(floorRect), "area before", NEAR_M2);
+      assertNear(batch.items[0]?.actual?.areaAfterM2, 0, "area after", NEAR_M2);
+      assertNear(batch.items[0]?.actual?.cutM2, areaOf(floorRect), "the whole floor is cut", NEAR_M2);
+      assertNear(batch.items[0]?.actual?.floorAreaAfterCallM2, 0, "area of the floor after the call", NEAR_M2);
+      assert.equal(batch.warnings.length, 1, JSON.stringify(batch.warnings));
+      assert.match(batch.warnings[0] ?? "", /not cutting anything/);
+
+      // The floor is still an element of the model, and its box in get_elements is the old one, as the box of a wall cut by a roof is.
+      const read = await elementsOf(client, [floor.id]);
+      assert.deepEqual(read.notFound, []);
+      for (const corner of ["min", "max"] as const) {
+        for (const axis of ["x", "y", "z"] as const) {
+          assertNear(read.elements[0]?.boundingBoxMm?.[corner][axis], floor.actual.boundingBoxMm?.[corner][axis] as number, `the box of the emptied floor, ${corner}.${axis}`);
+        }
+      }
+
+      // In the picture nothing of the floor is left: the ground shows where it was, and the red is gone.
+      const after = await fromAbove(client, "всё-после", floorRect);
+      assert.equal(boundsOfBand(after, "red"), null, "no red is left in the picture");
+      assertGrass(after, planRegion(whole, floorRect, 0.1), "the ground shows where the floor was");
+
+      // A later opening on that floor cuts nothing, and fails as it does anywhere.
+      const later = await openings(client, [{ floorId: floor.id, boundaryMm: rectangle({ x0: 1000, y0: y + 1000, x1: 2000, y1: y + 2000 }) }]);
+      assert.equal(later.committed, false);
+      assert.equal(later.items[0]?.status, "failed");
+      assert.match(later.items[0]?.error ?? "", /has 0 m² after it, and had 0 m² before/);
+
+      // An outline that is exactly the outline of the floor does the same.
+      const second: Rect = { x0: 20000, y0: y, x1: 26000, y1: y + 4000 };
+      const other = await makeFloor(client, second, w.floorType.id);
+      const same = await openings(client, [{ floorId: other.id, boundaryMm: rectangle(second) }]);
+      assert.equal(same.committed, true, JSON.stringify(same));
+      assert.equal(same.items[0]?.status, "created");
+      assertNear(same.items[0]?.actual?.areaAfterM2, 0, "the same outline: area after", NEAR_M2);
+      assert.equal(same.warnings.length, 1, JSON.stringify(same.warnings));
+      assert.match(same.warnings[0] ?? "", /not cutting anything/);
     });
   });
 

@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { describe, it, type TestContext } from "node:test";
+import { describe, it } from "node:test";
 
 import { checkCanClose } from "../../src/cli/closeRule.ts";
 import { BridgeClient } from "../../src/client.ts";
 import { defaultConnectionPath } from "../../src/connection.ts";
 import { BridgeRpcError } from "../../src/errors.ts";
-import { UndoNotConfirmedError, undoLastOperation, type UndoResult } from "../../src/undo.ts";
 import { decodePng, meanColour, reportColours, type Band, type Pixels, type Region } from "../pngPixels.ts";
+import { undoWithOneRetry } from "../undoRetry.ts";
 
 // These tests need a running Revit with the RevitMCP plugin loaded. Each run creates one new project in the test folder
 // and leaves it open and saved. Colour is judged on snapshots, two ways: the pixels are read here, so a machine decides,
@@ -126,9 +126,6 @@ const WALL_PITCH_MM = 3500;
 const CAMERA_DISTANCE_MM = 18000;
 const CAMERA_HEIGHT_MM = 1500;
 
-/** The undo tool refuses to post a second undo until a minute after an unconfirmed one, so that two never overlap. */
-const UNDO_SETTLE_MS = 61_000;
-
 const RED: Rgb = { r: 255, g: 0, b: 0 };
 const GREEN: Rgb = { r: 0, g: 200, b: 0 };
 const BLUE: Rgb = { r: 0, g: 0, b: 255 };
@@ -232,35 +229,6 @@ async function isModified(client: BridgeClient): Promise<boolean> {
   const active = (await modelInfo(client)).activeDocument;
   assert.ok(active);
   return active.isModified;
-}
-
-/**
- * Undoes the last operation. Revit itself now and then refuses the Undo that was posted to it: its journal says `API queue
- * command ID_BUTTON_UNDO cannot be invoked in this context`, and the tool answers `Not undone`, with the model as it was.
- * It came in windows of time and for every tool tried (create_walls, create_type, create_materials), also in the stage 2
- * undo tests, and the cause is not known. So this posts the undo once more after the minute the tool asks for. Before it
- * does, it asks what became of the first post, as an undo that ran late must not be posted again. The retry is written to
- * the result of the test.
- */
-async function undoWithOneRetry(t: TestContext, client: BridgeClient): Promise<UndoResult> {
-  try {
-    return await undoLastOperation(client);
-  } catch (error) {
-    if (!(error instanceof UndoNotConfirmedError) || !error.message.startsWith("Not undone")) {
-      throw error;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, UNDO_SETTLE_MS));
-    const first = (await client.call("get_last_undo_result", {})) as UndoResult;
-    t.diagnostic(`Revit did not run the posted undo of ${String(first.transactionName)}; a minute later get_last_undo_result says ${first.state}, so ${first.state === "undone" ? "it is not posted again" : "it is posted again"}`);
-
-    if (first.state === "undone") {
-      return first;
-    }
-    assert.equal(first.state, "not_confirmed", `an undo that is neither confirmed nor undone must not be posted again: ${JSON.stringify(first)}`);
-
-    return undoLastOperation(client);
-  }
 }
 
 /** Saves, so that a later read of isModified says whether a call changed anything. */
