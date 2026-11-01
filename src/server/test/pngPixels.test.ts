@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { crc32, deflateSync } from "node:zlib";
 
-import { bandOf, decodePng, hsv, meanColour, reportColours, type Pixels } from "./pngPixels.ts";
+import { bandOf, boundsOfBand, decodePng, hsv, meanColour, reportColours, reportHues, type Pixels } from "./pngPixels.ts";
 
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -110,6 +110,38 @@ describe("PNG reader for tests", () => {
     const grey = reportColours(pixels, { left: 0.9, top: 0, right: 1, bottom: 1 });
     assert.equal(grey.coloured, 0);
     assert.equal(grey.dominant, null);
+  });
+
+  it("counts the hues of a range that no band holds, such as olive, and leaves greys out", () => {
+    // Olive is hue 70: between yellow and green, so it is in no band. Red is 0, and the grey is not coloured.
+    const rgb = picture(100, 10, (x) => (x < 40 ? [133, 150, 50] : x < 70 ? [250, 10, 10] : [34, 40, 48]));
+    const pixels = decodePng(encode(100, 10, 3, 2, rgb, [2]));
+
+    assert.equal(reportColours(pixels, { left: 0, top: 0, right: 0.4, bottom: 1 }).dominant, null, "olive is in no band");
+    const olive = reportHues(pixels, 55, 110, { left: 0, top: 0, right: 0.4, bottom: 1 });
+    assert.deepEqual({ ...olive }, { pixels: 400, coloured: 400, inRange: 400, share: 1 });
+
+    const whole = reportHues(pixels, 55, 110);
+    assert.equal(whole.pixels, 1000);
+    assert.equal(whole.coloured, 700, "the grey part is not coloured");
+    assert.equal(whole.inRange, 400);
+    assert.ok(Math.abs(whole.share - 400 / 700) < 1e-9);
+
+    const grey = reportHues(pixels, 55, 110, { left: 0.7, top: 0, right: 1, bottom: 1 });
+    assert.equal(grey.coloured, 0);
+    assert.equal(grey.share, 0);
+    assert.equal(reportHues(pixels, 0, 30, { left: 0.4, top: 0, right: 0.7, bottom: 1 }).share, 1);
+  });
+
+  it("finds the box of a colour, and nothing where the colour is not", () => {
+    const rgb = picture(20, 10, (x, y) => (x >= 5 && x <= 11 && y >= 2 && y <= 6 ? [250, 10, 10] : x === 18 && y === 8 ? [10, 220, 10] : [34, 40, 48]));
+    const pixels = decodePng(encode(20, 10, 3, 2, rgb, [4]));
+
+    assert.deepEqual(boundsOfBand(pixels, "red"), { left: 5, top: 2, right: 11, bottom: 6, count: 35 });
+    assert.deepEqual(boundsOfBand(pixels, "green"), { left: 18, top: 8, right: 18, bottom: 8, count: 1 });
+    assert.equal(boundsOfBand(pixels, "blue"), null, "grey is no colour");
+    assert.deepEqual(boundsOfBand(pixels, "red", { left: 0, top: 0, right: 0.5, bottom: 0.5 }), { left: 5, top: 2, right: 9, bottom: 4, count: 15 });
+    assert.equal(boundsOfBand(pixels, "red", { left: 0.6, top: 0, right: 1, bottom: 1 }), null);
   });
 
   it("averages a region, so that two pictures of one scene can be compared", () => {

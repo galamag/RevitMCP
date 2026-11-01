@@ -31,7 +31,7 @@ const MAX_SNAPSHOT_WIDTH_PX = 4096;
 const MAX_ELEMENT_IDS = 1000;
 
 /** The category words of list_types and get_elements, the same as `CategoryMap` in the plugin. */
-const ELEMENT_CATEGORIES = ["walls", "floors", "roofs", "ceilings", "doors", "windows", "furniture", "plumbing", "stairs", "railings"] as const;
+const ELEMENT_CATEGORIES = ["walls", "floors", "roofs", "ceilings", "doors", "windows", "furniture", "plumbing", "stairs", "railings", "toposolid"] as const;
 
 /** The limits of the sun, which the plugin checks too. */
 const MAX_SUN_AZIMUTH_DEG = 360;
@@ -187,7 +187,7 @@ export const tools: readonly ToolDefinition[] = [
       "[{ id, family, name }] sorted by family, then name, then id, so the order holds between calls. ids are " +
       "strings: pass them back unchanged. family and name are Revit's own text, usually Russian: read them to choose " +
       "a type, and never guess or translate one. An empty list means that no type of this category is loaded in the " +
-      "project, not that the category is unknown. view_templates is not a category of elements: it lists the 3D view " +
+      "project, not that the category is unknown. toposolid lists the types of ground for create_ground. view_templates is not a category of elements: it lists the 3D view " +
       "templates for viewTemplateId of create_3d_view, in the same shape, with family as an empty string. " +
       "Related tools: get_elements, get_model_info, create_3d_view.",
     inputSchema: {
@@ -517,6 +517,82 @@ export const tools: readonly ToolDefinition[] = [
           .refine((item) => item.edgeSlopesDeg.some((slope) => slope !== null), {
             message: "edgeSlopesDeg needs a slope on at least one edge.",
           }),
+      ),
+    },
+  },
+  {
+    name: "create_ceilings",
+    description:
+      "Creates ceilings in the active project from outlines of straight edges. boundaryMm lists the corners in " +
+      "millimetres in model coordinates, in either direction. The outline closes by itself from the last point to the " +
+      `first, so do not repeat the first point: equal neighbouring points are refused. It needs at least ${MIN_OUTLINE_POINTS} points, ` +
+      "and an outline that crosses or touches itself, or encloses no area, is refused. Take typeId from list_types with ceilings and levelId from get_model_info. " +
+      "heightOffsetMm is required, and there is no default: it is the height of the underside of the ceiling above its level, in millimetres, and negative is below the level. " +
+      "Revit puts a new ceiling 2600 mm above its level whatever the height of the storey, so this tool always writes the height you give, and fails the item if the ceiling does not have it once Revit has built it. " +
+      "The height of the outline itself changes nothing. The thickness of the type goes up from the underside, and a basic ceiling type has none. " +
+      "actual is { areaM2, heightOffsetMm, typeId, levelId, boundingBoxMm }: areaM2 is in square metres, heightOffsetMm is read back from the ceiling, " +
+      "and boundingBoxMm is { min, max } in millimetres in model coordinates, so min.z is the underside: the elevation of the level plus heightOffsetMm. " +
+      BATCH_RULES +
+      " Related tools: list_types, get_model_info, get_elements, create_floors, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.strictObject({
+          boundaryMm: z.array(planPoint("A corner of the outline")).min(MIN_OUTLINE_POINTS).describe(`The corners of the outline, at least ${MIN_OUTLINE_POINTS}. It closes by itself.`),
+          typeId: elementId("The id of a ceiling type from list_types"),
+          levelId: elementId("The id of the level the ceiling hangs from"),
+          heightOffsetMm: z
+            .number()
+            .describe("The height of the underside of the ceiling above the level, in millimetres. Required: Revit's own height is 2600. Negative is below the level."),
+        }),
+      ),
+    },
+  },
+  {
+    name: "create_floor_openings",
+    description:
+      "Cuts openings through floors of the active project, as for a stair or a shaft, one outline of straight edges for each. floorId is the id of a floor, from create_floors or from get_elements with floors. " +
+      "boundaryMm lists the corners of the opening in millimetres in model coordinates, in either direction. The outline closes by itself from the last point to the " +
+      `first, so do not repeat the first point: equal neighbouring points are refused. It needs at least ${MIN_OUTLINE_POINTS} points, ` +
+      "and an outline that crosses or touches itself, or encloses no area, is refused. The cut goes straight down through the whole floor, so the height of the outline does not matter. " +
+      "An opening may reach across the edge of the floor: it cuts what overlaps. An opening that cuts nothing, because it lies wholly outside the floor or inside an opening cut before it, " +
+      "is accepted by Revit with no error, only a warning, so this tool reads the area of the floor before and after each opening, and an opening that takes no area off the floor fails its item: " +
+      "the batch stops there and nothing lands, and error gives the two areas. The openings of a list are cut in order, so the same floor may appear in several items, and each one sees the area the earlier ones left. " +
+      "actual is { floorId, areaBeforeM2, areaAfterM2, cutM2, floorAreaAfterCallM2, boundaryMm }: the first two areas are the area of the floor in square metres, read from the model, just before and just after this opening, and cutM2 is the difference. " +
+      "floorAreaAfterCallM2 is the area of the floor after the whole call, so it differs from areaAfterM2 when a later item cut the same floor. " +
+      "boundaryMm lists the start of each edge of the opening as Revit keeps it, as { x, y } in millimetres, and it is null if Revit keeps the opening as a plain rectangle, which it did not for a rectangular outline. elementId is the id of the opening, which is an element of its own. " +
+      BATCH_RULES +
+      " Related tools: create_floors, get_elements, get_warnings, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.strictObject({
+          floorId: elementId("The id of the floor to cut, from create_floors or get_elements with floors"),
+          boundaryMm: z.array(planPoint("A corner of the opening")).min(MIN_OUTLINE_POINTS).describe(`The corners of the opening, at least ${MIN_OUTLINE_POINTS}. It closes by itself.`),
+        }),
+      ),
+    },
+  },
+  {
+    name: "create_ground",
+    description:
+      "Creates ground in the active project from outlines of straight edges, as a flat toposolid. boundaryMm lists the corners in millimetres in model coordinates, in either direction. " +
+      "The outline closes by itself from the last point to the " +
+      `first, so do not repeat the first point: equal neighbouring points are refused. It needs at least ${MIN_OUTLINE_POINTS} points, ` +
+      "and an outline that crosses or touches itself, or encloses no area, is refused. Take typeId from list_types with toposolid, whose names are Russian and in the template end with the thickness, and levelId from get_model_info. " +
+      "topOffsetMm is required: it is the height of the top surface of the ground above the level, in millimetres, and negative is below the level. The thickness of the type goes down from the top, and the height of the outline itself changes nothing. " +
+      "Put the top of the ground below the underside of every floor it reaches: a floor lies with its top on its level and its thickness below, so under a floor 300 mm thick on the level a top of -400 is clear. " +
+      "A ground whose top is higher overlaps the floor, and Revit keeps the warning Highlighted toposolid and floor overlap. The tool does not refuse that and does not hide it: the call lands and the warning comes back in warnings, " +
+      "so read warnings after every call, and get_warnings keeps listing it, with the ids of the ground and the floor. " +
+      "actual is { topOffsetMm, typeId, levelId, boundingBoxMm }: topOffsetMm is read back from the ground, and boundingBoxMm is { min, max } in millimetres in model coordinates, so max.z is the top. " +
+      BATCH_RULES +
+      " Related tools: list_types, get_model_info, get_elements, get_warnings, create_floors, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.strictObject({
+          boundaryMm: z.array(planPoint("A corner of the outline")).min(MIN_OUTLINE_POINTS).describe(`The corners of the outline, at least ${MIN_OUTLINE_POINTS}. It closes by itself.`),
+          levelId: elementId("The id of the level the ground is measured from"),
+          topOffsetMm: z.number().describe("The height of the top surface of the ground above the level, in millimetres. Negative is below the level."),
+          typeId: elementId("The id of a ground type from list_types with toposolid"),
+        }),
       ),
     },
   },

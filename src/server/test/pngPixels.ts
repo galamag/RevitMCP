@@ -27,6 +27,15 @@ export interface Region {
 
 export type Band = "red" | "green" | "blue";
 
+/** A box of pixels, edges included, with the number of pixels of the band that it holds. */
+export interface PixelBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  count: number;
+}
+
 export interface BandStats {
   /** The pixels of the band in the region. */
   count: number;
@@ -199,6 +208,82 @@ export function reportColours(pixels: Pixels, region: Region = { left: 0, top: 0
   );
 
   return { pixels: total, coloured, bands, dominant };
+}
+
+export interface HueReport {
+  /** The pixels of the region, coloured or not. */
+  pixels: number;
+  /** The pixels that have a hue at all: neither grey nor nearly black. */
+  coloured: number;
+  /** The coloured pixels whose hue lies in the range. */
+  inRange: number;
+  /** The share of the coloured pixels that lie in the range, from 0 to 1. 0 when none is coloured. */
+  share: number;
+}
+
+/**
+ * Counts the coloured pixels of a region whose hue lies from `fromDeg` up to, not including, `toDeg`, in degrees. The three
+ * bands of {@link reportColours} are for pure primaries: a colour in between, such as olive grass, falls in none of them,
+ * and a test for it names the hues it measured.
+ */
+export function reportHues(pixels: Pixels, fromDeg: number, toDeg: number, region: Region = { left: 0, top: 0, right: 1, bottom: 1 }): HueReport {
+  if (pixels.channels < 3) {
+    throw new Error("a grey picture has no colour to report");
+  }
+
+  let total = 0;
+  let coloured = 0;
+  let inRange = 0;
+
+  for (let y = Math.floor(region.top * pixels.height); y < Math.ceil(region.bottom * pixels.height); y++) {
+    for (let x = Math.floor(region.left * pixels.width); x < Math.ceil(region.right * pixels.width); x++) {
+      const at = (y * pixels.width + x) * pixels.channels;
+      const { hue, saturation, value } = hsv(pixels.data[at]!, pixels.data[at + 1]!, pixels.data[at + 2]!);
+      total++;
+
+      if (saturation >= MIN_SATURATION && value >= MIN_VALUE) {
+        coloured++;
+        if (hue >= fromDeg && hue < toDeg) {
+          inRange++;
+        }
+      }
+    }
+  }
+
+  return { pixels: total, coloured, inRange, share: coloured === 0 ? 0 : inRange / coloured };
+}
+
+/**
+ * The smallest box of pixels, edges included, that holds every coloured pixel of a band in a region, or null when there is none.
+ * A test can find a shape by its colour this way, and then take its places from where it really stands in the picture.
+ */
+export function boundsOfBand(pixels: Pixels, band: Band, region: Region = { left: 0, top: 0, right: 1, bottom: 1 }): PixelBox | null {
+  if (pixels.channels < 3) {
+    throw new Error("a grey picture has no colour to look for");
+  }
+
+  let left = pixels.width;
+  let top = pixels.height;
+  let right = -1;
+  let bottom = -1;
+  let count = 0;
+
+  for (let y = Math.floor(region.top * pixels.height); y < Math.ceil(region.bottom * pixels.height); y++) {
+    for (let x = Math.floor(region.left * pixels.width); x < Math.ceil(region.right * pixels.width); x++) {
+      const at = (y * pixels.width + x) * pixels.channels;
+      const { hue, saturation, value } = hsv(pixels.data[at]!, pixels.data[at + 1]!, pixels.data[at + 2]!);
+
+      if (saturation >= MIN_SATURATION && value >= MIN_VALUE && bandOf(hue) === band) {
+        left = Math.min(left, x);
+        top = Math.min(top, y);
+        right = Math.max(right, x);
+        bottom = Math.max(bottom, y);
+        count++;
+      }
+    }
+  }
+
+  return count === 0 ? null : { left, top, right, bottom, count };
 }
 
 /** The mean colour of a region, each channel from 0 to 255, so that two pictures of one scene can be told apart by what they draw. */

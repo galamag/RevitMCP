@@ -51,6 +51,9 @@ const roof = {
   edgeSlopesDeg: [30, null, 30.5, null],
 };
 const attachment = { wallId: "10", roofId: "20" };
+const ceiling = { boundaryMm: floor.boundaryMm, typeId: "1", levelId: "2", heightOffsetMm: 2350 };
+const opening = { floorId: "10", boundaryMm: floor.boundaryMm };
+const ground = { boundaryMm: floor.boundaryMm, levelId: "2", topOffsetMm: -400, typeId: "5" };
 const material = { name: "Краснодарский кирпич", colorRgb: { r: 170, g: 40, b: 35 } };
 const layer = { thicknessMm: 200, materialId: "7", function: "structure" };
 const typeItem = { category: "walls", baseTypeId: "408", name: "Стена 250 мм" };
@@ -68,7 +71,10 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "attach_walls",
         "cancel_request",
         "create_3d_view",
+        "create_ceilings",
+        "create_floor_openings",
         "create_floors",
+        "create_ground",
         "create_levels",
         "create_materials",
         "create_project",
@@ -189,6 +195,14 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.deepEqual(JSON.parse(textOf(result)), types);
   });
 
+  it("passes the toposolid category of list_types and get_elements to Revit", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, []));
+
+    assert.ok(!(await client.callTool({ name: "list_types", arguments: { category: "toposolid" } })).isError);
+    assert.ok(!(await client.callTool({ name: "get_elements", arguments: { category: "toposolid" } })).isError);
+    assert.deepEqual(bridge.frames.map((frame) => frame.params), [{ category: "toposolid" }, { category: "toposolid" }]);
+  });
+
   for (const [tool, args] of [
     ["list_types", { category: "стены" }],
     ["list_types", {}],
@@ -294,6 +308,39 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["create_type", { items: [{ ...typeItem, layers: [{ ...layer, material: "Бетон" }] }] }],
     ["create_type", { items: [{ ...typeItem, width: 250 }] }],
     ["create_type", { items: batch(501, typeItem) }],
+    ["create_ceilings", {}],
+    ["create_ceilings", { items: [] }],
+    ["create_ceilings", { items: batch(501, ceiling) }],
+    ["create_ceilings", { items: [{ boundaryMm: ceiling.boundaryMm, typeId: "1", levelId: "2" }] }],
+    ["create_ceilings", { items: [{ ...ceiling, heightOffsetMm: "2350" }] }],
+    ["create_ceilings", { items: [{ ...ceiling, heightOffsetMm: null }] }],
+    ["create_ceilings", { items: [{ ...ceiling, boundaryMm: ceiling.boundaryMm.slice(0, 2) }] }],
+    ["create_ceilings", { items: [{ ...ceiling, boundaryMm: [{ x: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }] }] }],
+    ["create_ceilings", { items: [{ ...ceiling, typeId: 757 }] }],
+    ["create_ceilings", { items: [{ ...ceiling, typeId: undefined }] }],
+    ["create_ceilings", { items: [{ ...ceiling, levelId: "" }] }],
+    ["create_ceilings", { items: [{ ...ceiling, height: 2350 }] }],
+    ["create_floor_openings", {}],
+    ["create_floor_openings", { items: [] }],
+    ["create_floor_openings", { items: batch(501, opening) }],
+    ["create_floor_openings", { items: [{ boundaryMm: opening.boundaryMm }] }],
+    ["create_floor_openings", { items: [{ ...opening, floorId: 10 }] }],
+    ["create_floor_openings", { items: [{ ...opening, floorId: "" }] }],
+    ["create_floor_openings", { items: [{ floorId: "10" }] }],
+    ["create_floor_openings", { items: [{ ...opening, boundaryMm: opening.boundaryMm.slice(0, 2) }] }],
+    ["create_floor_openings", { items: [{ ...opening, boundaryMm: [{ x: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }] }] }],
+    ["create_floor_openings", { items: [{ ...opening, perpendicular: true }] }],
+    ["create_ground", {}],
+    ["create_ground", { items: [] }],
+    ["create_ground", { items: batch(501, ground) }],
+    ["create_ground", { items: [{ boundaryMm: ground.boundaryMm, levelId: "2", typeId: "5" }] }],
+    ["create_ground", { items: [{ ...ground, topOffsetMm: "-400" }] }],
+    ["create_ground", { items: [{ ...ground, typeId: undefined }] }],
+    ["create_ground", { items: [{ ...ground, typeId: 272908 }] }],
+    ["create_ground", { items: [{ ...ground, levelId: undefined }] }],
+    ["create_ground", { items: [{ ...ground, levelId: "" }] }],
+    ["create_ground", { items: [{ ...ground, boundaryMm: ground.boundaryMm.slice(0, 2) }] }],
+    ["create_ground", { items: [{ ...ground, elevationMm: 0 }] }],
     ["attach_walls", {}],
     ["attach_walls", { items: [] }],
     ["attach_walls", { items: batch(501, attachment) }],
@@ -483,6 +530,99 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /left as it is/);
     assert.match(description, /same family as the base type/);
     assert.match(description, /create_walls/);
+  });
+
+  it("passes ceilings with every height given, a height of 0 and a negative one included, and adds none", async (t) => {
+    const answer = { committed: true, items: [{ index: 0, status: "created", elementId: "300301" }], warnings: [], errors: [], dialogs: [] };
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
+    const items = [ceiling, { ...ceiling, heightOffsetMm: 0 }, { ...ceiling, heightOffsetMm: -300.5 }];
+
+    const result = await client.callTool({ name: "create_ceilings", arguments: { items } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "create_ceilings");
+    assert.deepEqual(bridge.frames[0]?.params, { items });
+    assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
+  it("passes floor openings, two for one floor in one list, with their order kept", async (t) => {
+    const answer = { committed: false, items: [{ index: 1, status: "failed", error: "Причина" }], warnings: [], errors: ["Причина"], dialogs: [] };
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
+    const items = [opening, { ...opening, boundaryMm: [{ x: 7000, y: 1000 }, { x: 8000, y: 1000 }, { x: 8000, y: 2000 }] }];
+
+    const result = await client.callTool({ name: "create_floor_openings", arguments: { items } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "create_floor_openings");
+    assert.deepEqual(bridge.frames[0]?.params, { items });
+    assert.deepEqual(JSON.parse(textOf(result)), answer);
+  });
+
+  it("passes ground with its top above, at and below the level, and adds no height", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true, warnings: ["Highlighted toposolid and floor overlap."] }));
+    const items = [ground, { ...ground, topOffsetMm: 0 }, { ...ground, topOffsetMm: 150.5 }];
+
+    const result = await client.callTool({ name: "create_ground", arguments: { items } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "create_ground");
+    assert.deepEqual(bridge.frames[0]?.params, { items });
+    assert.match(textOf(result), /toposolid and floor overlap/);
+  });
+
+  it("tells the model the truth about create_ceilings", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "create_ceilings")?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    assert.match(description, /500/);
+    for (const word of ["created", "failed", "rolled_back", "not attempted", "actual"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /heightOffsetMm is required, and there is no default/);
+    assert.match(description, /2600/);
+    assert.match(description, /underside/);
+    assert.match(description, /list_types with ceilings/);
+  });
+
+  it("tells the model the truth about create_floor_openings", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "create_floor_openings")?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    assert.match(description, /500/);
+    for (const word of ["created", "failed", "rolled_back", "not attempted", "actual"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /reach across the edge of the floor/);
+    assert.match(description, /takes no area off the floor fails its item/);
+    assert.match(description, /same floor may appear in several items/);
+    assert.match(description, /floorAreaAfterCallM2/);
+  });
+
+  it("tells the model the truth about create_ground", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "create_ground")?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    assert.match(description, /500/);
+    for (const word of ["created", "failed", "rolled_back", "not attempted", "actual"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /topOffsetMm is required/);
+    assert.match(description, /list_types with toposolid/);
+    assert.match(description, /below the underside of every floor it reaches/);
+    assert.match(description, /toposolid and floor overlap/);
+    assert.match(description, /does not refuse that and does not hide it/);
   });
 
   it("passes attachments unchanged and returns the honest result", async (t) => {
