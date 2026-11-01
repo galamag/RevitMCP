@@ -125,10 +125,13 @@ const SNAPSHOT_WIDTH_PX = 1200;
 const DOOR = "Russia\\Двери\\Дверь-Одинарная-Панель.rfa";
 const WINDOW = "Russia\\Окна\\Окно-закрепленное.rfa";
 const BED = "Russia\\Мебель\\Кровати\\Кровать-Стандарт.rfa";
-/** A door that is a bare opening: its type says no width and no height that Revit names as such. */
+/** A door that is a bare opening, with no leaf: its Width and Height read 0, and its size is in its Rough Width and Rough Height. */
 const DOOR_OPENING = "Russia\\Двери\\Дверь-Проем.rfa";
-/** A window that is a bare opening: its type says no width and no height either. */
+/** A window that is a bare opening, with no sash, the same way. */
 const WINDOW_OPENING = "Russia\\Окна\\Окно-Квадратный проем.rfa";
+/** A sectional door, and a window made as an instance: their Width, Height, Rough Width and Rough Height all read 0, so they say no size at all. */
+const LIFT_DOOR = "Russia\\Двери\\Дверь-Подъемная-Сборная.rfa";
+const FIXED_INSTANCE_WINDOW = "Russia\\Окна\\Экземпляр-окно-закрепленное.rfa";
 /** A family of the library whose types are no doors or windows, though it lies in the folder of windows. */
 const OTHER_OPENING = "Russia\\Окна\\Экземпляр - Проем.rfa";
 
@@ -146,6 +149,9 @@ interface World {
   window: TypeActual;
   /** A window 600 wide and 600 high, which fits above a door in a wall of 3000. */
   lowWindow: TypeActual;
+  /** Wall types with one layer, nearly black and white, for the pictures: the dark wall in front, the white one behind it. */
+  darkWall: string;
+  lightWall: string;
 }
 
 let world: World | undefined;
@@ -205,14 +211,16 @@ function assertLanded<A>(batch: Batch<A>): void {
   }
 }
 
-/** Everything landed with the status asked for, and the items are returned. */
-function landed<A>(batch: Batch<A>, status: string): Array<Item<A> & { elementId: string; actual: A }> {
+/** Everything landed with the status asked for, and the items are returned. An item carries no warning unless the caller says it should. */
+function landed<A>(batch: Batch<A>, status: string, itemWarnings: "none" | "some" = "none"): Array<Item<A> & { elementId: string; actual: A }> {
   assertLanded(batch);
 
   return batch.items.map((item) => {
     assert.equal(item.status, status, JSON.stringify(item));
     assert.ok(item.elementId && item.actual, JSON.stringify(item));
-    assert.deepEqual(item.warnings, [], JSON.stringify(item));
+    if (itemWarnings === "none") {
+      assert.deepEqual(item.warnings, [], JSON.stringify(item));
+    }
     return item as Item<A> & { elementId: string; actual: A };
   });
 }
@@ -377,6 +385,92 @@ function boundsWhere(pixels: Pixels, within: { left: number; top: number; right:
   return found;
 }
 
+/** What a picture of a dark wall, taken square on, shows, and the way from a place on the wall to the pixels of the picture. */
+interface Seen {
+  pixels: Pixels;
+  wallColour: Colour;
+  wall: PixelRect;
+  perMmX: number;
+  perMmY: number;
+  /** A part of the wall, from its start along it and up from its foot, in millimetres, as fractions of the picture. */
+  regionOf: (fromX: number, toX: number, fromZ: number, toZ: number) => Region;
+  /** A pixel column as a distance along the wall from its start, and a pixel row as a height above its foot, in millimetres. */
+  worldX: (pixel: number) => number;
+  worldZ: (pixel: number) => number;
+  mean: (region: Region) => Colour;
+}
+
+/**
+ * The dark wall of a scene, along +X from x 0 to 6000 at y, and a white wall 4 m behind it that is higher and wider, so that the light
+ * that comes through an opening is white. Nothing stands at the middle of the wall, which the camera looks at.
+ */
+async function darkScene(client: BridgeClient, y: number): Promise<string> {
+  const w = ready();
+  const wallId = await makeWall(client, { x: 0, y }, { x: WALL_LENGTH_MM, y }, { typeId: w.darkWall });
+  await makeWall(client, { x: -3000, y: y + 4000 }, { x: 9000, y: y + 4000 }, { typeId: w.lightWall, heightMm: 6000 });
+
+  return wallId;
+}
+
+/** A picture of the dark wall of a scene from 10 m south, level, at the middle of it, so that the wall is a flat rectangle in the picture. */
+async function seeWall(client: BridgeClient, y: number, title: string): Promise<Seen> {
+  const pixels = await snapshot(client, title, { x: 3000, y: y - 10000, z: 1500 }, { x: 3000, y, z: 1500 });
+  const wallColour = colourAt(pixels, Math.floor(pixels.width / 2), Math.floor(pixels.height / 2));
+  assert.ok(luminance(wallColour) < 90, `the middle of the picture is the dark wall between the openings, and it is ${JSON.stringify(wallColour)}`);
+
+  const wall = boundsWhere(pixels, { left: 0, top: 0, right: pixels.width - 1, bottom: pixels.height - 1 }, (colour) => distance(colour, wallColour) <= 12);
+  assert.ok(wall && wall.count > 50000, `the dark wall is the one big dark thing in the picture: ${JSON.stringify(wall)}`);
+  const perMmX = (wall.right - wall.left + 1) / WALL_LENGTH_MM;
+  const perMmY = (wall.bottom - wall.top + 1) / WALL_HEIGHT_MM;
+  assertNear(perMmX / perMmY, 1, "the wall is seen square on, so a millimetre is as long across as it is up", 0.02);
+  console.log(`# the wall in the picture: ${JSON.stringify(wall)}, ${perMmX.toFixed(4)} pixels a millimetre`);
+
+  return {
+    pixels,
+    wallColour,
+    wall,
+    perMmX,
+    perMmY,
+    regionOf: (fromX, toX, fromZ, toZ) => ({
+      left: (wall.left + fromX * perMmX) / pixels.width,
+      right: (wall.left + toX * perMmX) / pixels.width,
+      top: (wall.bottom + 1 - toZ * perMmY) / pixels.height,
+      bottom: (wall.bottom + 1 - fromZ * perMmY) / pixels.height,
+    }),
+    worldX: (pixel) => (pixel - wall.left) / perMmX,
+    worldZ: (pixel) => (wall.bottom + 1 - pixel) / perMmY,
+    mean: (region) => {
+      const { r, g, b } = meanColour(pixels, region);
+      return [r, g, b];
+    },
+  };
+}
+
+/** The smallest box of pixels in a part of the wall that are not the colour of the wall, which is where an opening is cut, with its reveals. */
+function openingIn(seen: Seen, fromX: number, toX: number, fromZ: number, toZ: number): { widthMm: number; heightMm: number; centreMm: number; headMm: number; footMm: number } {
+  const { wall, perMmX, perMmY } = seen;
+  const box = boundsWhere(
+    seen.pixels,
+    // Inside the box of the wall, whose outermost rows and columns are the colour of the wall: outside it the pixels blend with what is behind.
+    {
+      left: Math.max(wall.left, Math.ceil(wall.left + fromX * perMmX)),
+      right: Math.min(wall.right, Math.floor(wall.left + toX * perMmX)),
+      top: Math.max(wall.top, Math.ceil(wall.bottom + 1 - toZ * perMmY)),
+      bottom: Math.min(wall.bottom, Math.floor(wall.bottom + 1 - fromZ * perMmY)),
+    },
+    (colour) => distance(colour, seen.wallColour) > 12,
+  );
+  assert.ok(box && box.count > 200, `an opening between ${fromX} and ${toX} mm: ${JSON.stringify(box)}`);
+
+  return {
+    widthMm: (box.right - box.left + 1) / perMmX,
+    heightMm: (box.bottom - box.top + 1) / perMmY,
+    centreMm: seen.worldX((box.left + box.right + 1) / 2),
+    headMm: seen.worldZ(box.top),
+    footMm: seen.worldZ(box.bottom + 1),
+  };
+}
+
 describe("stage 3 live checks: doors and windows in walls", { timeout: 900_000 }, () => {
   it("creates a project for this run, with the types it needs", async () => {
     await withClient(async (client) => {
@@ -398,7 +492,29 @@ describe("stage 3 live checks: doors and windows in walls", { timeout: 900_000 }
       const window = await loadRow(client, WINDOW, "600 x 1200 мм", 600, 1200);
       const lowWindow = await loadRow(client, WINDOW, "600 x 1050 мм", 600, 600);
 
-      world = { ground, upper, wallType, door, window, lowWindow };
+      // The walls of the pictures: one layer of a nearly black material, and one of white.
+      const [dark, light] = landed(
+        (await client.call("create_materials", {
+          items: [
+            { name: `Тёмная-стена ${stamp}`, colorRgb: { r: 20, g: 20, b: 20 } },
+            { name: `Светлая-стена ${stamp}`, colorRgb: { r: 255, g: 255, b: 255 } },
+          ],
+        })) as Batch<unknown>,
+        "created",
+      );
+      assert.ok(dark && light);
+      const [darkType, lightType] = landed(
+        (await client.call("create_type", {
+          items: [
+            { category: "walls", baseTypeId: wallType.id, name: `Стена тёмная ${stamp}`, layers: [{ thicknessMm: 200, materialId: dark.elementId, function: "structure" }] },
+            { category: "walls", baseTypeId: wallType.id, name: `Стена светлая ${stamp}`, layers: [{ thicknessMm: 200, materialId: light.elementId, function: "structure" }] },
+          ],
+        })) as Batch<unknown>,
+        "created",
+      );
+      assert.ok(darkType && lightType);
+
+      world = { ground, upper, wallType, door, window, lowWindow, darkWall: darkType.elementId, lightWall: lightType.elementId };
       console.log(`# world: ${JSON.stringify(world)}`);
     });
   });
@@ -496,31 +612,13 @@ describe("stage 3 live checks: doors and windows in walls", { timeout: 900_000 }
 
   it("first instance of a new type cuts the wall", async (t) => {
     await withClient(async (client) => {
-      const w = ready();
       const y = PICTURE_SCENE_Y_MM;
 
       // Two rows that nothing has placed yet, so their symbols are not active: the first instance of each is the case that does not cut
       // unless the document is regenerated after the activation. The dark wall is the one thing in the picture that is dark.
       const door = await loadRow(client, DOOR, "900 x 2100 мм", 900, 2100);
       const window = await loadRow(client, WINDOW, "900 x 1200 мм", 900, 1200);
-
-      const [dark] = landed((await client.call("create_materials", { items: [{ name: `Тёмная-стена ${stamp}`, colorRgb: { r: 20, g: 20, b: 20 } }] })) as Batch<unknown>, "created");
-      const [light] = landed((await client.call("create_materials", { items: [{ name: `Светлая-стена ${stamp}`, colorRgb: { r: 255, g: 255, b: 255 } }] })) as Batch<unknown>, "created");
-      assert.ok(dark && light);
-      const [darkType, lightType] = landed(
-        (await client.call("create_type", {
-          items: [
-            { category: "walls", baseTypeId: w.wallType.id, name: `Стена тёмная ${stamp}`, layers: [{ thicknessMm: 200, materialId: dark.elementId, function: "structure" }] },
-            { category: "walls", baseTypeId: w.wallType.id, name: `Стена светлая ${stamp}`, layers: [{ thicknessMm: 200, materialId: light.elementId, function: "structure" }] },
-          ],
-        })) as Batch<unknown>,
-        "created",
-      );
-      assert.ok(darkType && lightType);
-
-      // The dark wall, and a white wall 4 m behind it that is higher and wider, so the light that comes through an opening is white.
-      const wallId = await makeWall(client, { x: 0, y }, { x: WALL_LENGTH_MM, y }, { typeId: darkType.elementId });
-      await makeWall(client, { x: -3000, y: y + 4000 }, { x: 9000, y: y + 4000 }, { typeId: lightType.elementId, heightMm: 6000 });
+      const wallId = await darkScene(client, y);
 
       const windowAt = 1500;
       const doorAt = 4000;
@@ -535,69 +633,44 @@ describe("stage 3 live checks: doors and windows in walls", { timeout: 900_000 }
       assert.equal(placedWindow.actual.cutsWall, true, "the first window of its type cuts the wall");
       assert.equal(placedDoor.actual.cutsWall, true, "the first door of its type cuts the wall");
 
-      // The camera stands 10 m south of the wall and looks at the middle of it, level, so the wall is a flat rectangle in the picture.
-      const pixels = await snapshot(client, "проёмы-вид-снаружи", { x: 3000, y: y - 10000, z: 1500 }, { x: 3000, y, z: 1500 });
-      const centre = colourAt(pixels, Math.floor(pixels.width / 2), Math.floor(pixels.height / 2));
-      const wallColour = centre;
-      assert.ok(luminance(wallColour) < 90, `the middle of the picture is the dark wall between the openings, and it is ${JSON.stringify(wallColour)}`);
-
-      const wall = boundsWhere(pixels, { left: 0, top: 0, right: pixels.width - 1, bottom: pixels.height - 1 }, (colour) => distance(colour, wallColour) <= 12);
-      assert.ok(wall && wall.count > 50000, `the dark wall is the one big dark thing in the picture: ${JSON.stringify(wall)}`);
-      const perMmX = (wall.right - wall.left + 1) / WALL_LENGTH_MM;
-      const perMmY = (wall.bottom - wall.top + 1) / WALL_HEIGHT_MM;
-      assertNear(perMmX / perMmY, 1, "the wall is seen square on, so a millimetre is as long across as it is up", 0.02);
-      console.log(`# the wall in the picture: ${JSON.stringify(wall)}, ${perMmX.toFixed(4)} pixels a millimetre`);
-
-      const regionOf = (fromX: number, toX: number, fromZ: number, toZ: number): Region => ({
-        left: (wall.left + fromX * perMmX) / pixels.width,
-        right: (wall.left + toX * perMmX) / pixels.width,
-        top: (wall.bottom + 1 - toZ * perMmY) / pixels.height,
-        bottom: (wall.bottom + 1 - fromZ * perMmY) / pixels.height,
-      });
-      const worldX = (pixel: number): number => (pixel - wall.left) / perMmX;
-      const worldZ = (pixel: number): number => (wall.bottom + 1 - pixel) / perMmY;
-      const mean = (region: Region): Colour => {
-        const { r, g, b } = meanColour(pixels, region);
-        return [r, g, b];
-      };
+      const seen = await seeWall(client, y, "проёмы-вид-снаружи");
+      const { wallColour } = seen;
 
       // The wall between and beside the openings is the colour of the wall everywhere: this is what the other regions are measured against.
       for (const [what, region] of [
-        ["between the openings", regionOf(2200, 3000, 300, 2500)],
-        ["right of the door", regionOf(4800, 5800, 300, 2500)],
-        ["above the openings", regionOf(300, 5700, 2300, 2800)],
+        ["between the openings", seen.regionOf(2200, 3000, 300, 2500)],
+        ["right of the door", seen.regionOf(4800, 5800, 300, 2500)],
+        ["above the openings", seen.regionOf(300, 5700, 2300, 2800)],
       ] as const) {
-        const colour = mean(region);
+        const colour = seen.mean(region);
         console.log(`# wall ${what}: ${JSON.stringify(colour.map(Math.round))}`);
         assert.ok(distance(colour, wallColour) < 10, `wall ${what} should be the colour of the wall: ${JSON.stringify(colour)}`);
       }
 
       // The window lets the white wall behind it show through its glass, so its middle is much lighter than the dark wall.
-      const glass = mean(regionOf(windowAt - 200, windowAt + 200, 1100, 1900));
+      const glass = seen.mean(seen.regionOf(windowAt - 200, windowAt + 200, 1100, 1900));
       console.log(`# glass of the window: ${JSON.stringify(glass.map(Math.round))}`);
       assert.ok(luminance(glass) > 200, `light comes through the window: ${JSON.stringify(glass)}`);
       assert.ok(luminance(glass) - luminance(wallColour) > 120, "and the window is far lighter than the wall");
 
-      // Where the light is, along the wall and up it, is where the window was asked for.
-      // The light of the window is looked for on its side of the wall only, as the leaf of the door is light too.
-      const bright = boundsWhere(pixels, { left: wall.left, top: wall.top, right: Math.floor(wall.left + 3000 * perMmX), bottom: wall.bottom }, (colour) => luminance(colour) > 200);
+      // Where the light is, along the wall and up it, is where the window was asked for. It is looked for on the window's side of the wall only, as the leaf of the door is light too.
+      const bright = boundsWhere(
+        seen.pixels,
+        { left: seen.wall.left, top: seen.wall.top, right: Math.floor(seen.wall.left + 3000 * seen.perMmX), bottom: seen.wall.bottom },
+        (colour) => luminance(colour) > 200,
+      );
       assert.ok(bright && bright.count > 1000, `the light of the window: ${JSON.stringify(bright)}`);
-      assertNear(worldX((bright.left + bright.right + 1) / 2), windowAt, "the light of the window, along the wall", 60);
-      assertNear(worldZ((bright.top + bright.bottom + 1) / 2), 900 + window.heightMm! / 2, "the light of the window, up the wall", 60);
+      assertNear(seen.worldX((bright.left + bright.right + 1) / 2), windowAt, "the light of the window, along the wall", 60);
+      assertNear(seen.worldZ((bright.top + bright.bottom + 1) / 2), 900 + window.heightMm! / 2, "the light of the window, up the wall", 60);
 
       // The door stands in its opening, and its leaf shows: something that is not the wall, to the right of the window, from the floor up to the head.
       // The search stays off the edges of the wall, where its pixels blend with the white wall behind it and are not the wall colour either.
-      const leaf = boundsWhere(
-        pixels,
-        { left: Math.floor(wall.left + 2600 * perMmX), top: Math.ceil(wall.bottom - 2800 * perMmY), right: Math.floor(wall.left + 5400 * perMmX), bottom: wall.bottom },
-        (colour) => distance(colour, wallColour) > 60,
-      );
-      assert.ok(leaf && leaf.count > 1000, `the leaf of the door: ${JSON.stringify(leaf)}`);
+      const leaf = openingIn(seen, 2600, 5400, 0, 2800);
       console.log(`# the door in the picture: ${JSON.stringify(leaf)}`);
-      assertNear(worldX((leaf.left + leaf.right + 1) / 2), doorAt, "the door, along the wall", 60);
-      assertNear(worldZ(leaf.top), door.heightMm!, "the head of the door", 60);
-      assertNear(worldZ(leaf.bottom + 1), 0, "the foot of the door", 60);
-      const leafColour = mean(regionOf(doorAt - 250, doorAt + 250, 300, 1800));
+      assertNear(leaf.centreMm, doorAt, "the door, along the wall", 60);
+      assertNear(leaf.headMm, door.heightMm!, "the head of the door", 60);
+      assertNear(leaf.footMm, 0, "the foot of the door", 60);
+      const leafColour = seen.mean(seen.regionOf(doorAt - 250, doorAt + 250, 300, 1800));
       assert.ok(distance(leafColour, wallColour) > 80, `the leaf of the door is not the wall: ${JSON.stringify(leafColour)}`);
 
       t.diagnostic(`window light ${JSON.stringify(glass.map(Math.round))}, wall ${JSON.stringify(wallColour)}, door ${JSON.stringify(leafColour.map(Math.round))}`);
@@ -810,22 +883,30 @@ describe("stage 3 live checks: doors and windows in walls", { timeout: 900_000 }
     });
   });
 
-  it("flip a type cannot do is refused before any change", async () => {
+  it("a flip the type cannot do fails its item, and nothing of the call stays", async () => {
     await withClient(async (client) => {
       const w = ready();
       const { id: wallId } = await wallAlongX(client);
+      await saved(client);
+      const before = await openingsOf(client);
 
-      // The fixed window cannot flip its hand. Revit says so for an instance only, so this is found by making one and rolling it back,
-      // and nothing of that is left: the project is as saved, with the same doors and windows, and the type is as it was.
-      const refused = await refusedAndUnchanged(
-        client,
-        [{ typeId: w.door.id, wallId, offsetAlongWallMm: 1000, flipHand: true }, { typeId: w.window.id, wallId, offsetAlongWallMm: 3000, sillHeightMm: 900, flipHand: true }],
-        /cannot flip its hand/,
-        "flipHand of a fixed window",
-      );
-      assert.match(refused.message, /place_hosted item 1/);
+      // The fixed window cannot flip its hand. Revit says so for an instance only, so the instance is made, and the item fails with the type
+      // named, and the door of item 0, which was made before it, goes with it.
+      const batch = await place(client, [
+        { typeId: w.door.id, wallId, offsetAlongWallMm: 1000, flipHand: true },
+        { typeId: w.window.id, wallId, offsetAlongWallMm: 3000, sillHeightMm: 900, flipHand: true },
+      ]);
+      console.log(`# flipHand of a fixed window: ${JSON.stringify(batch.items.map((item) => [item.status, item.error]))}`);
+      assert.equal(batch.committed, false, JSON.stringify(batch));
+      assert.deepEqual(batch.items.map((item) => item.status), ["rolled_back", "failed"]);
+      assert.equal(batch.items[0]?.elementId, null, "a door that is not in the model has no id");
+      assert.match(batch.items[1]?.error ?? "", /cannot flip its hand/);
+      assert.ok((batch.items[1]?.error ?? "").includes(w.window.name), `the error names the type '${w.window.name}': ${batch.items[1]?.error}`);
+      assert.ok(batch.errors.some((error) => /Item 1 failed, so nothing landed/.test(error)), JSON.stringify(batch.errors));
+      assert.deepEqual(await openingsOf(client), before, "a failed batch places nothing");
+      assert.equal(await isModified(client), false, "and leaves the project as saved");
 
-      // The same window can flip its facing, and the door its hand: only the thing it cannot do is refused.
+      // The same window can flip its facing, and the door its hand: only the thing it cannot do fails.
       const placed = landed(
         await place(client, [
           { typeId: w.window.id, wallId, offsetAlongWallMm: 3000, sillHeightMm: 900, flipFacing: true },
@@ -835,6 +916,41 @@ describe("stage 3 live checks: doors and windows in walls", { timeout: 900_000 }
       );
       assert.equal(placed[0]?.actual.facingFlipped, true);
       assert.equal(placed[1]?.actual.handFlipped, true);
+    });
+  });
+
+  it("the first instance of a type that is not active takes a flip, or fails on one it cannot do", async () => {
+    await withClient(async (client) => {
+      const { id: wallId, y } = await wallAlongX(client);
+
+      // Two rows that nothing has placed: their symbols are not active, so the first instance activates its type in the same transaction.
+      const door = await loadRow(client, DOOR, "750 x 2100 мм", 750, 2100);
+      const window = await loadRow(client, WINDOW, "600 x 1500 мм", 600, 1500);
+      await saved(client);
+      const before = await openingsOf(client);
+
+      // A flip it cannot do fails the item, and the activation goes with the rest: the project is as saved.
+      const failed = await place(client, [{ typeId: window.id, wallId, offsetAlongWallMm: 3000, sillHeightMm: 900, flipHand: true }]);
+      assert.equal(failed.committed, false, JSON.stringify(failed));
+      assert.equal(failed.items[0]?.status, "failed");
+      assert.match(failed.items[0]?.error ?? "", /cannot flip its hand/);
+      assert.deepEqual(await openingsOf(client), before);
+      assert.equal(await isModified(client), false);
+
+      // The same type is still the first of its kind: with a flip it can do, the instance lands, flipped, and it cuts its wall.
+      const [first] = landed(await place(client, [{ typeId: window.id, wallId, offsetAlongWallMm: 3000, sillHeightMm: 900, flipFacing: true }]), "created");
+      assert.ok(first);
+      assert.equal(first.actual.facingFlipped, true);
+      assert.equal(first.actual.cutsWall, true, "the first window of its type cuts the wall though a flip was done after it was made");
+
+      // The first door of a type, with both flips, which a door can do: both are read from the model, and the door swings to the right of the wall.
+      const [swung] = landed(await place(client, [{ typeId: door.id, wallId, offsetAlongWallMm: 1000, flipFacing: true, flipHand: true }]), "created");
+      assert.ok(swung);
+      assert.equal(swung.actual.facingFlipped, true);
+      assert.equal(swung.actual.handFlipped, true);
+      assert.equal(swung.actual.cutsWall, true, "the first door of its type cuts the wall though it was flipped");
+      const box = await boxOf(client, swung.elementId);
+      assert.ok(y - box.min.y - (box.max.y - y) > 300, `a door with flipFacing swings to the right of a wall along +X: ${JSON.stringify(box)}`);
     });
   });
 
@@ -867,19 +983,22 @@ describe("stage 3 live checks: doors and windows in walls", { timeout: 900_000 }
       assert.ok(other?.actual.typeIds[0]);
       await refusedAndUnchanged(client, [{ typeId: other.actual.typeIds[0].id, wallId, offsetAlongWallMm: 3000, sillHeightMm: 900 }], /another category than doors and windows/, "a family of another category among the windows");
 
-      // A type that does not say its size cannot be checked against the wall, so it is refused naming the type, rather than guessed at.
-      // Both are real families of the library, and both read a width and a height of 0: a door that is a bare opening, and a window that is.
-      const [doorOpening] = landed(await loadFamily(client, [{ path: DOOR_OPENING, typeName: "0762 x 2032 мм" }]), "created");
-      const [windowOpening] = landed(await loadFamily(client, [{ path: WINDOW_OPENING }]), "created");
-      assert.ok(doorOpening && windowOpening);
+      // A type that does not say its size cannot be checked against the wall, so it is refused naming the type, rather than guessed at. Both are
+      // real families of the library: their Width and Height read 0 and so do their Rough Width and Rough Height. (A bare opening reads 0 in
+      // Width and Height too, but it keeps its size in the rough ones, and is placed: see the test of bare openings.)
+      const [lift] = landed(await loadFamily(client, [{ path: LIFT_DOOR }]), "created");
+      const [fixed] = landed(await loadFamily(client, [{ path: FIXED_INSTANCE_WINDOW }]), "created");
+      assert.ok(lift && fixed);
       for (const [what, type] of [
-        ["a door opening", doorOpening.actual.typeIds[0]],
-        ["a window opening", windowOpening.actual.typeIds[0]],
+        ["a sectional door", lift.actual.typeIds[0]],
+        ["a window made as an instance", fixed.actual.typeIds[0]],
       ] as const) {
         assert.ok(type, what);
         const noSize = await refusedAndUnchanged(client, [{ typeId: type.id, wallId, offsetAlongWallMm: 3000, sillHeightMm: 900 }], /says no width above zero or no height above zero/, what);
         assert.ok(noSize.message.includes(type.id), `${what}: the message names the type ${type.id}`);
+        assert.match(noSize.message, /its Width reads 0 and its Height 0, and its Rough Width 0 and Rough Height 0/);
         assert.match(noSize.message, /nothing is placed on a guess/);
+        assert.doesNotMatch(noSize.message, /load_family/, "a size written by load_family would not help, so the message does not advise it");
       }
     });
   });
@@ -921,6 +1040,12 @@ describe("stage 3 live checks: doors and windows in walls", { timeout: 900_000 }
           assertNear(along, offset, `${entry.what}, offset ${offset}: along the wall`, 60);
           assert.ok(Math.abs(across) < 250, `${entry.what}, offset ${offset}: the box is centred ${across} off the axis`);
         }
+
+        // A window over one that is there is refused, whichever way the wall runs, and the one that is there is found where it stands along the wall,
+        // measured from the start of the wall in its own direction: 1200 to 1800 for the window at 1500.
+        const overlap = await refusedAndUnchanged(client, [{ typeId: w.window.id, wallId, offsetAlongWallMm: 1700, sillHeightMm: 900 }], /overlaps the window/, `${entry.what}: a window over one that is there`);
+        assert.ok(overlap.message.includes(windows[0]!.elementId), `${entry.what}: the message names the window ${windows[0]!.elementId}: ${overlap.message}`);
+        assert.match(overlap.message, /1200 to 1800 mm along the wall/, entry.what);
       }
 
       // An offset that is past the end of a wall that runs the other way is past its end all the same, and the message gives where it runs.
@@ -980,6 +1105,159 @@ describe("stage 3 live checks: doors and windows in walls", { timeout: 900_000 }
       const [onLevel] = landed(await place(client, [{ typeId: w.door.id, wallId, offsetAlongWallMm: 5500 }]), "created");
       assert.ok(onLevel);
       assertNear(onLevel.actual.sillHeightMm, 0, "a door on the level", SIZE_NEAR_MM);
+    });
+  });
+
+  it("a bare opening is cut at its rough size, and a size written on it is refused", async () => {
+    await withClient(async (client) => {
+      const w = ready();
+
+      // load_family: Revit takes a Width and a Height for a bare opening and reads them back, and the opening stays what it was. So the item
+      // fails, nothing is loaded, and the project is as saved. A decimal and a size for one dimension only are refused as well.
+      await saved(client);
+      const doorsBefore = await listTypes(client, "doors");
+      const windowsBefore = await listTypes(client, "windows");
+      for (const [what, request, pattern] of [
+        ["a door opening, both sizes", { path: DOOR_OPENING, typeName: "0762 x 2032 мм", widthMm: 1200, heightMm: 2400 }, /nothing else in the type moved/],
+        ["a door opening, the width only", { path: DOOR_OPENING, typeName: "0762 x 2032 мм", widthMm: 1200.5 }, /widthMm 1200\.5 for type '0762 x 2032 мм'/],
+        ["a window opening", { path: WINDOW_OPENING, typeName: "0400 x 1200 мм", widthMm: 1500, heightMm: 1000 }, /nothing else in the type moved/],
+      ] as const) {
+        const batch = await loadFamily(client, [request]);
+        assert.equal(batch.committed, false, `${what}: ${JSON.stringify(batch).slice(0, 600)}`);
+        assert.equal(batch.items[0]?.status, "failed", what);
+        assert.match(batch.items[0]?.error ?? "", pattern, what);
+        assert.match(batch.items[0]?.error ?? "", /Rough Width and Rough Height/, what);
+        assert.match(batch.items[0]?.error ?? "", /Nothing was loaded/, what);
+      }
+      assert.deepEqual(await listTypes(client, "doors"), doorsBefore, "no door type was loaded");
+      assert.deepEqual(await listTypes(client, "windows"), windowsBefore, "no window type was loaded");
+      assert.equal(await isModified(client), false, "a failed load leaves the project as saved");
+
+      // A size that a type holds already moves nothing and is not looked at: it is no change, and it lands. The sizes of a fixed window row, asked as they are.
+      const [same] = landed(await loadFamily(client, [{ path: WINDOW, typeName: "600 x 1350 мм", widthMm: 600, heightMm: 900 }]), "created");
+      assert.ok(same);
+      assertNear(same.actual.typeIds[0]?.widthMm, 600, "a size the type holds", SIZE_NEAR_MM);
+
+      // With no size given the rows load, and read 0 for a Width and a Height.
+      const [door1] = landed(await loadFamily(client, [{ path: DOOR_OPENING, typeName: "0762 x 2032 мм" }]), "created");
+      const [door2] = landed(await loadFamily(client, [{ path: DOOR_OPENING, typeName: "0762 x 2134 мм" }]), "created");
+      const [windowOpening] = landed(await loadFamily(client, [{ path: WINDOW_OPENING, typeName: "0400 x 1200 мм" }]), "created");
+      assert.ok(door1?.actual.typeIds[0] && door2?.actual.typeIds[0] && windowOpening?.actual.typeIds[0]);
+      for (const type of [door1.actual.typeIds[0], door2.actual.typeIds[0], windowOpening.actual.typeIds[0]]) {
+        assert.equal(type.widthMm, 0, `${type.name}: a bare opening reads a Width of 0`);
+        assert.equal(type.heightMm, 0, `${type.name}: and a Height of 0`);
+      }
+
+      // Placed, they are placed at their rough size, and each says so in a warning: 762 x 2032, 762 x 2134 (102 higher) and 400 x 1200 on a sill of 900.
+      const y = PICTURE_SCENE_Y_MM + SCENE_PITCH_MM * 3;
+      const wallId = await darkScene(client, y);
+      const placed = landed(
+        await place(client, [
+          { typeId: door1.actual.typeIds[0].id, wallId, offsetAlongWallMm: 1000 },
+          { typeId: door2.actual.typeIds[0].id, wallId, offsetAlongWallMm: 2100 },
+          { typeId: windowOpening.actual.typeIds[0].id, wallId, offsetAlongWallMm: 4500, sillHeightMm: 900 },
+        ]),
+        "created",
+        "some",
+      );
+      for (const item of placed) {
+        assert.equal(item.actual.cutsWall, true, JSON.stringify(item));
+        assert.equal(item.warnings.length, 1, JSON.stringify(item.warnings));
+        assert.match(item.warnings[0] ?? "", /so its opening is taken as its Rough Width and Rough Height/);
+      }
+      assert.match(placed[0]?.warnings[0] ?? "", /: 762 x 2032 mm/);
+      assert.match(placed[1]?.warnings[0] ?? "", /: 762 x 2134 mm/);
+      assert.match(placed[2]?.warnings[0] ?? "", /: 400 x 1200 mm/);
+
+      // The checks used that size: a door opening at 5800 would end at 6181 and not at 6200, and one over the first would cross it from 619 to 1381.
+      await refusedAndUnchanged(client, [{ typeId: door1.actual.typeIds[0].id, wallId, offsetAlongWallMm: 5800 }], /5419 mm to 6181 mm along/, "a bare opening past the end of the wall");
+      const overlap = await refusedAndUnchanged(client, [{ typeId: w.window.id, wallId, offsetAlongWallMm: 1300, sillHeightMm: 900 }], /overlaps the door/, "a window over a bare opening that is there");
+      assert.match(overlap.message, /619 to 1381 mm along the wall/, "the opening that is there is measured at its rough size");
+      assert.match(overlap.message, /0 to 2032 mm above level/);
+
+      // The wall is cut at that size, which is what the picture shows: not at the 1200 x 2400 that was asked for in vain. The openings differ by what their rows say.
+      const seen = await seeWall(client, y, "проёмы-проёмы-без-створок");
+      const first = openingIn(seen, 300, 1650, 0, 2800);
+      const second = openingIn(seen, 1700, 2850, 0, 2800);
+      const small = openingIn(seen, 4000, 5000, 0, 2800);
+      console.log(`# bare openings in the picture: ${JSON.stringify({ first, second, small })}`);
+      assertNear(first.widthMm, 762, "the width of the first door opening", 20);
+      assertNear(first.heightMm, 2032, "the height of the first door opening", 20);
+      assertNear(first.centreMm, 1000, "the first door opening, along the wall", 20);
+      assertNear(first.footMm, 0, "the foot of the first door opening", 20);
+      assertNear(second.widthMm, 762, "the width of the second door opening", 20);
+      assertNear(second.heightMm - first.heightMm, 102, "the second opening is higher by what its row says", 15);
+      assertNear(small.widthMm, 400, "the width of the window opening", 20);
+      assertNear(small.heightMm, 1200, "the height of the window opening", 20);
+      assertNear(small.centreMm, 4500, "the window opening, along the wall", 20);
+      assertNear(small.footMm, 900, "the sill of the window opening", 20);
+      assert.ok(first.widthMm < 1000 && first.heightMm < 2200, "the opening is not the 1200 x 2400 that a write into its Width asked for");
+    });
+  });
+
+  it("a window through the slope of a wall that follows a roof is refused, and one under the ridge lands", async () => {
+    await withClient(async (client) => {
+      const w = ready();
+      const y = scene();
+      const x = 70000;
+      const roofType = (await listTypes(client, "roofs"))[0];
+      assert.ok(roofType, "the template has a roof type");
+
+      // A house of 12000 by 8000 on the ground level, walls up to the upper level, and a gable roof sloped 30 degrees on the long sides, so the
+      // short walls, east and west, reach up to the ridge and fall to the eaves: their top is 4000 + 0.577 mm for each millimetre from a corner, to 6309 at the middle.
+      const outline = [{ x, y }, { x: x + 12000, y }, { x: x + 12000, y: y + 8000 }, { x, y: y + 8000 }];
+      const built = (await client.call("create_walls", {
+        items: outline.map((startMm, index) => ({ startMm, endMm: outline[(index + 1) % outline.length], typeId: w.wallType.id, levelId: w.ground.id, topLevelId: w.upper.id })),
+      })) as Batch<unknown>;
+      const [south, east] = landed(built, "created").map((item) => item.elementId);
+      const wallIds = built.items.map((item) => item.elementId as string);
+      assert.ok(south && east);
+      const [roof] = landed(
+        (await client.call("create_roof", { items: [{ outlineMm: outline, levelId: w.upper.id, typeId: roofType.id, overhangMm: 500, edgeSlopesDeg: [30, null, 30, null] }] })) as Batch<unknown>,
+        "created",
+      );
+      assert.ok(roof);
+      landed((await client.call("attach_walls", { items: wallIds.map((wallId) => ({ wallId, roofId: roof.elementId })) })) as Batch<unknown>, "created");
+
+      // The highest point of the east wall is the ridge. That is all get_elements says of it, and it is no limit for a window near the eaves.
+      const [row] = (await elementsOf(client, [east])).elements;
+      const ridge = w.upper.elevationMm + 4000 * Math.tan((30 * Math.PI) / 180);
+      assertNear(row?.topMm, ridge, "the highest point of the east wall", 1);
+
+      const near = (offset: number, sillHeightMm: number): Placed => ({ typeId: w.window.id, wallId: east, offsetAlongWallMm: offset, sillHeightMm });
+
+      // The refusals come first, so that nothing of the wall is in their way: each one is refused for the slope and for nothing else.
+      // At 1000 along the east wall the window, 600 wide, reaches from 700 to 1300: the wall is 4404.7 high at 701, and 4750.0 at 1299.
+      // A head at 4500 is above the wall at its nearer edge, by 95 mm, but under the highest point of the wall, 6309, which is all that a check of the top could see.
+      const slope = await refusedAndUnchanged(client, [near(1000, 3300)], /where the opening stands/, "a window through the slope");
+      assert.match(slope.message, /place_hosted item 0/);
+      assert.match(slope.message, /3300 mm to 4500 mm above level/);
+      assert.match(slope.message, /reaches only 4404\.\d+ mm above that level/);
+      assert.match(slope.message, /9[45]\.\d+ mm above the top of the wall at its lowest/);
+      assert.match(slope.message, /4404\.\d+ mm at the edge of the opening nearer the start of the wall, 4577\.\d+ mm in the middle and 4749\.\d+ mm at the edge nearer its end/);
+      assert.ok(4500 < ridge, "the highest point of the wall would have let it through");
+
+      // The same from the other end of the wall, where the slope falls the other way, and the lower edge is the one nearer the end.
+      const far = await refusedAndUnchanged(client, [near(7000, 3300)], /where the opening stands/, "a window through the slope at the far end");
+      assert.match(far.message, /4749\.\d+ mm at the edge of the opening nearer the start of the wall, 4577\.\d+ mm in the middle and 4404\.\d+ mm at the edge nearer its end/);
+
+      // The ridge in the middle of the opening: the top at its middle is 6309, but at its two edges 6137, and the edges decide. A head at 6200 is through the slope on both sides.
+      const astride = await refusedAndUnchanged(client, [near(4000, 5000)], /where the opening stands/, "a window with the ridge in the middle of it");
+      assert.match(astride.message, /6136\.\d+ mm at the edge of the opening nearer the start of the wall, 6309\.\d+ mm in the middle and 6136\.\d+ mm at the edge nearer its end/);
+
+      // A head at 4200 is under the wall at 1000 along, and one at 4700 under the ridge stands in 6137 of wall: both land.
+      const [low] = landed(await place(client, [near(1000, 3000)]), "created");
+      assert.ok(low);
+      assert.equal(low.actual.cutsWall, true);
+      const [ridged] = landed(await place(client, [near(4000, 3500)]), "created");
+      assert.ok(ridged);
+      assert.equal(ridged.actual.cutsWall, true);
+
+      // The walls that stay at the eaves are flat: their top is as high everywhere, and the message is the plain one.
+      const [flat] = landed(await place(client, [{ typeId: w.window.id, wallId: south, offsetAlongWallMm: 6000, sillHeightMm: 2500 }]), "created");
+      assert.ok(flat);
+      const plain = await refusedAndUnchanged(client, [{ typeId: w.window.id, wallId: south, offsetAlongWallMm: 6000, sillHeightMm: 3300 }], /reaches only 4000 mm above that level where the opening stands/, "a window above a flat wall");
+      assert.doesNotMatch(plain.message, /not as high everywhere/);
     });
   });
 

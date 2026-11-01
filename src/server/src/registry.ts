@@ -620,13 +620,15 @@ export const tools: readonly ToolDefinition[] = [
       "So a door row called 800 x 2100 really is 850 x 2000, and a window row called 600 x 1200 is 600 x 900. This tool does not read the catalog, so read its sizes yourself and give them: " +
       "widthMm and heightMm, in millimetres, are written on the type named by typeName, as the Width and Height that Revit names as such, and read back from the type. They need typeName. " +
       "A type whose size Revit cannot write, such as the doors of the GOST folders, whose size the family computes, or a family with no width or height, fails the item after it was loaded, and the batch rolls back, so nothing stays loaded: leave that size out. " +
+      "A size that Revit takes and reads back, but that moves nothing else in the type, fails the item too, and nothing stays loaded: the door and window openings of the library (bare openings with no leaf or sash) take a width and a height and cut at their Rough Width and Rough Height all the same. " +
+      "Such a type needs no size here: place_hosted reads its rough size, and says so in a warning. " +
       "A type from a catalog that is loaded without widthMm and heightMm gets a warning with the size it really has. Revit also reports the ignored columns in warnings at the top, which is expected for a catalog. " +
       "A load brings the nested families of a family too, so a type that you did not ask for can appear in list_types. " +
       "actual is { familyId, typeIds }: familyId is the id of the family as Revit gave it back, and typeIds lists [{ id, name, widthMm, heightMm }] sorted by name, read from the project. " +
       "For a whole-family item it lists every type of the family, and for an item with typeName only that type. widthMm and heightMm are the Width and Height of the type in millimetres, or null for a type that has none, as furniture often has. " +
-      "elementId is the id of the family for a whole-family item and the id of the type for an item with typeName. Take typeId for place_instances from typeIds. " +
+      "elementId is the id of the family for a whole-family item and the id of the type for an item with typeName. Take typeId for place_instances or place_hosted from typeIds. " +
       BATCH_RULES +
-      " Related tools: place_instances, list_types, get_elements, create_walls, save_project.",
+      " Related tools: place_instances, place_hosted, list_types, get_elements, create_walls, save_project.",
     inputSchema: {
       items: batchOf(
         z
@@ -656,7 +658,7 @@ export const tools: readonly ToolDefinition[] = [
     name: "place_instances",
     description:
       "Places instances of loaded family types in the active project: furniture, fixtures, plants and the like, standing on a level or hanging on a wall. Take typeId from actual.typeIds of load_family, " +
-      "or from list_types with furniture or plumbing; a type that is no family type is refused, and the refusal lists some that are. " +
+      "or from list_types with furniture or plumbing; a type that is no family type is refused, and the refusal lists some that are. A door or window type is refused as well, before anything changes: use place_hosted for those, which checks the opening against the wall and confirms that it cuts it. " +
       "pointMm is { x, y } in millimetres in model coordinates, and levelId comes from get_model_info. The height of the instance is the elevation of the level plus elevationMm, 0 by default, " +
       "so on a level at 4000 an elevationMm of 0 stands at 4000. A family that keeps a height of its own does not take another one: a bed stands on its level, and a light fitting stands at the mounting height of its family. " +
       "Such an item fails after Revit placed it, and the error says at what height Revit put it, which is the elevationMm to ask for; a toilet that stands on the floor takes any. " +
@@ -697,15 +699,19 @@ export const tools: readonly ToolDefinition[] = [
       "The whole opening must lie in the wall: the offset minus half the width of the type is at least 0, and the offset plus half the width is at most the length of the wall. An opening that ends exactly at the end of the wall is allowed. " +
       "sillHeightMm is the height of the bottom of the opening, in millimetres, above the BASE LEVEL of the wall: the level the wall stands on, and not its foot, so on a wall with a base offset of -400 a sill of 0 is 400 above the foot. " +
       "A door takes 0 when sillHeightMm is left out. A window must be given one, and a window without it is refused. The sill that the family keeps is not used, for a door either. " +
-      "The top of the opening, the sill plus the height of the type, must not pass the top of the wall, and its bottom must not lie below the foot of the wall. " +
-      "For a wall whose top follows a roof the top is its highest point, so read topMm in get_elements and keep clear of the part that the roof cuts. " +
-      "The width and the height come from the type, as the Width and Height that Revit names as such: a type that does not say them is refused, and a row of a type catalog that was loaded without widthMm and heightMm has the size of its family, " +
-      "so give the size in load_family. " +
+      "The top of the opening, the sill plus the height of the type, must not pass the top of the wall where the opening stands, and its bottom must not lie below the foot of the wall. " +
+      "The top of the wall is read from its real shape, on the axis of the wall, at the edge of the opening nearer the start, in the middle and at the edge nearer the end, and the lowest of the three counts: " +
+      "a wall that follows a roof, such as the gable end that attach_walls raises, is high at its ridge and low at its eaves, and a window through the slope is refused, with the three tops in the message. " +
+      "The highest point of the wall, topMm in get_elements, is no limit for a window. A top that bends more than that inside one opening is not followed. " +
+      "The width and the height are those of the type, as the Width and Height that Revit names as such. A type that is a bare opening, such as the door and window openings of the library that have no leaf or sash, reads a Width and a Height of 0 " +
+      "and keeps its size in its Rough Width and Rough Height: the wall is cut at that size, and the item carries a warning that says it was taken there. A size written into the Width of such a type changes nothing, " +
+      "so load_family refuses widthMm and heightMm for it, and place_hosted does not read them. A type that says no size at all is refused naming it. " +
+      "A row of a type catalog that was loaded without widthMm and heightMm has the size of its family, so give the size in load_family for a type whose Width and Height are above 0. " +
       "Openings may touch but not overlap. An opening that overlaps a door or window already in the same wall, or an earlier item of the same call, is refused. It counts only when the two share both a stretch along the wall and a stretch of height, so a window above a door does not overlap it. " +
       "Everything that can be known is checked before anything changes, and the call is refused naming the item and saying what was found: the length of the wall, its top, the element it overlaps. " +
-      "That includes a curved wall and a curtain wall, which are refused by name, and a flipFacing or flipHand that the type cannot do. Revit would accept a doorway past the end of the wall, above its top or on top of another with no warning, which is why these are checked here. " +
+      "That includes a curved wall and a curtain wall, which are refused by name. Revit would accept a doorway past the end of the wall, above its top or on top of another with no warning, which is why these are checked here. " +
       "The opening faces the LEFT of the direction of the wall, from its start to its end, whatever side of the wall the point lies on. For a wall drawn counter-clockwise round a house that is the inside, and the door swing lies on that side. " +
-      "flipFacing true puts it on the other side. flipHand true turns its hand to the other direction along the wall, which for a door puts the hinges at the other end. A type can refuse a flip: a fixed window cannot flip its hand, and then flipHand is refused before anything changes. " +
+      "flipFacing true puts it on the other side. flipHand true turns its hand to the other direction along the wall, which for a door puts the hinges at the other end. Whether a type can flip is known only once an instance exists, so a flipFacing or flipHand that the type cannot do fails its item after the instance is made, and the batch rolls back: a fixed window cannot flip its hand. " +
       "A type that is not active is activated and the model regenerated before its first instance, because the first instance of a type does not otherwise cut its wall. " +
       "After each instance is made, its host, its place along the wall, its sill, its level and its flips are read from the model and compared with the request, and the wall must list it among its inserts. " +
       "An instance that Revit put elsewhere or that does not cut the wall fails its item, and the batch rolls back. " +
@@ -725,7 +731,7 @@ export const tools: readonly ToolDefinition[] = [
             .optional()
             .describe("The height of the bottom of the opening above the base level of the wall, in millimetres. Optional for a door, which takes 0, and required for a window."),
           flipFacing: z.boolean().default(false).describe("Puts the opening on the other side of the wall: by default it faces the left of the direction from the start of the wall to its end."),
-          flipHand: z.boolean().default(false).describe("Turns the hand of the door or window to the other direction along the wall; for a door the hinges go to the other end. Refused for a type that cannot flip its hand."),
+          flipHand: z.boolean().default(false).describe("Turns the hand of the door or window to the other direction along the wall; for a door the hinges go to the other end. Fails the item for a type that cannot flip its hand."),
         }),
       ),
     },

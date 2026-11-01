@@ -108,7 +108,11 @@ public sealed class LoadFamilyCommand : ICommand
 
     /// <summary>
     /// Writes the sizes asked for on the type, regenerates, and reads them back. A size Revit does not hold after that fails the
-    /// item: the type is in the document, but not the one that was asked for.
+    /// item: the type is in the document, but not the one that was asked for. A size that Revit holds and that moves nothing else
+    /// fails it too. Live Revit: the width and height of a bare opening (<c>Дверь-Проем</c>, <c>Окно-Квадратный проем</c>) take any value
+    /// and read it back, while the opening is cut at its rough size as before, so the read-back alone proves nothing. A size drives a type
+    /// when, with the type active (its geometry is empty before), the box of its solids or one of its other lengths moves with it:
+    /// a door panel and a fixed window move both, a bare opening neither.
     /// </summary>
     private static void WriteSizes(Document document, FamilySymbol symbol, LoadInput input)
     {
@@ -118,6 +122,16 @@ public sealed class LoadFamilyCommand : ICommand
         {
             return;
         }
+
+        if (!symbol.IsActive)
+        {
+            symbol.Activate();
+            document.Regenerate();
+        }
+
+        var before = FamilySizes.ShapeOf(symbol);
+        var written = new HashSet<long>();
+        var changes = false;
 
         foreach (var (which, word, asked) in sizes)
         {
@@ -131,6 +145,9 @@ public sealed class LoadFamilyCommand : ICommand
                     $"The {word} of type '{symbol.Name}' of family '{symbol.FamilyName}' cannot be written: it is read-only, as the family computes it itself, so {word}Mm cannot be set. Nothing was loaded.");
             }
 
+            changes |= Math.Abs(Units.InternalToMm(parameter.AsDouble()) - asked) > SameSizeMm;
+            written.Add(parameter.Id.Value);
+
             if (!parameter.Set(Units.MmToInternal(asked)))
             {
                 throw new InvalidOperationException($"Revit refused {Units.FormatNumber(asked)} mm as the {word} of type '{symbol.Name}' of family '{symbol.FamilyName}'.");
@@ -141,13 +158,22 @@ public sealed class LoadFamilyCommand : ICommand
 
         foreach (var (which, word, asked) in sizes)
         {
-            var actual = SizeMm(symbol, which);
+            var actual = FamilySizes.ParameterMm(symbol, which);
 
             if (actual is null || Math.Abs(actual.Value - asked) > SameSizeMm)
             {
                 throw new InvalidOperationException(
                     $"Revit took {Units.FormatNumber(asked)} mm as the {word} of type '{symbol.Name}' of family '{symbol.FamilyName}', and the type holds {(actual is null ? "no value" : $"{Units.FormatNumber(actual.Value)} mm")}. Nothing was loaded.");
             }
+        }
+
+        // A size the type holds already moves nothing and proves nothing, so only a size that changed is looked at.
+        if (changes && !FamilySizes.Moved(before, FamilySizes.ShapeOf(symbol), written))
+        {
+            throw new InvalidOperationException(
+                $"Revit took {string.Join(" and ", sizes.Select(size => $"{size.Word}Mm {Units.FormatNumber(size.Mm)}"))} for type '{symbol.Name}' of family '{symbol.FamilyName}' and reads it back, but nothing else in the type moved: "
+                + "its geometry and its other lengths are as they were, so the family does not use its Width and Height and a size written there changes nothing. "
+                + "A bare opening is such a family: it keeps its size in its Rough Width and Rough Height, and place_hosted reads it there. Nothing was loaded. Leave widthMm and heightMm out.");
         }
     }
 
@@ -303,7 +329,7 @@ public sealed class LoadFamilyCommand : ICommand
     {
         foreach (var (which, word, asked) in AskedSizes(input))
         {
-            var actual = SizeMm(symbol, which);
+            var actual = FamilySizes.ParameterMm(symbol, which);
 
             if (actual is null)
             {
@@ -354,8 +380,8 @@ public sealed class LoadFamilyCommand : ICommand
             ];
         }
 
-        var width = SizeMm(symbol, BuiltInParameter.FAMILY_WIDTH_PARAM);
-        var height = SizeMm(symbol, BuiltInParameter.FAMILY_HEIGHT_PARAM);
+        var width = FamilySizes.ParameterMm(symbol, BuiltInParameter.FAMILY_WIDTH_PARAM);
+        var height = FamilySizes.ParameterMm(symbol, BuiltInParameter.FAMILY_HEIGHT_PARAM);
         var holds = width is null || height is null
             ? "holds the sizes of the family itself"
             : $"is {Units.FormatNumber(width.Value)} x {Units.FormatNumber(height.Value)} mm, the size of the family itself";
@@ -385,13 +411,9 @@ public sealed class LoadFamilyCommand : ICommand
             .ThenBy(symbol => symbol.Id.Value)
             .ToList();
 
-    /// <summary>Whether the type has this size parameter and it can be written.</summary>
+    /// <summary>Whether the type has this size parameter, it can be written, and it holds a size: one that reads 0 is not used by the family, and a size written there is refused.</summary>
     private static bool CanWrite(FamilySymbol symbol, BuiltInParameter which) =>
-        symbol.get_Parameter(which) is { StorageType: StorageType.Double, IsReadOnly: false };
-
-    /// <summary>A size parameter of a type in millimetres, or <c>null</c> when the type has none that Revit names as such.</summary>
-    private static double? SizeMm(FamilySymbol symbol, BuiltInParameter which) =>
-        symbol.get_Parameter(which) is { StorageType: StorageType.Double } parameter ? Units.InternalToMm(parameter.AsDouble()) : null;
+        symbol.get_Parameter(which) is { StorageType: StorageType.Double, IsReadOnly: false } parameter && parameter.AsDouble() > 0;
 
     private static object Describe(Document document, Element element)
     {
@@ -409,8 +431,8 @@ public sealed class LoadFamilyCommand : ICommand
             {
                 id = symbol.Id.ToString(),
                 name = symbol.Name,
-                widthMm = SizeMm(symbol, BuiltInParameter.FAMILY_WIDTH_PARAM),
-                heightMm = SizeMm(symbol, BuiltInParameter.FAMILY_HEIGHT_PARAM),
+                widthMm = FamilySizes.ParameterMm(symbol, BuiltInParameter.FAMILY_WIDTH_PARAM),
+                heightMm = FamilySizes.ParameterMm(symbol, BuiltInParameter.FAMILY_HEIGHT_PARAM),
             }),
         };
     }

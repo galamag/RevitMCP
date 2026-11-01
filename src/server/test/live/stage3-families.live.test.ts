@@ -490,13 +490,17 @@ describe("stage 3 live checks: families and instances", { timeout: 900_000 }, ()
         "created",
       );
       const defaultDoor = typeNamed((await loadFamily(client, [{ path: DOOR, typeName: "800 x 2100 мм" }])).items[0]!.actual!, "800 x 2100 мм");
+      // place_instances refuses doors and windows, so they go through place_hosted, which also confirms that each one cuts its wall.
       const doors = landed(
-        await place(client, [
-          { typeId: defaultDoor.id, pointMm: { x: 2000, y }, levelId: w.ground.id, hostWallId: wall!.elementId },
-          { typeId: sizedDoor.id, pointMm: { x: 5000, y }, levelId: w.ground.id, hostWallId: wall!.elementId },
-        ]),
+        (await client.call("place_hosted", {
+          items: [
+            { typeId: defaultDoor.id, wallId: wall!.elementId, offsetAlongWallMm: 2000 },
+            { typeId: sizedDoor.id, wallId: wall!.elementId, offsetAlongWallMm: 5000 },
+          ],
+        })) as Batch<{ cutsWall: boolean }>,
         "created",
       );
+      assert.ok(doors.every((door) => door.actual.cutsWall));
       const defaultBox = await boxSize(client, doors[0]!.elementId);
       const sizedBox = await boxSize(client, doors[1]!.elementId);
       console.log(`# door boxes: family size 850 x 2000 -> ${JSON.stringify(defaultBox)}, written 750 x 2100 -> ${JSON.stringify(sizedBox)}`);
@@ -1054,6 +1058,70 @@ describe("stage 3 live checks: families and instances", { timeout: 900_000 }, ()
         assert.equal(countOf(after, category), countOf(before, category), category);
       }
       assert.equal(await isModified(client), false, "a refused call changes nothing");
+    });
+  });
+
+  it("place_instances refuses doors and windows before any change, and points to place_hosted", async () => {
+    await withClient(async (client) => {
+      const w = ready();
+      const { bed } = w;
+      assert.ok(bed);
+
+      // The rows may be in the project from the tests above or not, so either status will do: the types are what is wanted.
+      const doorBatch = await loadFamily(client, [{ path: DOOR, typeName: "800 x 2100 мм" }]);
+      const windowBatch = await loadFamily(client, [{ path: WINDOW, typeName: "600 x 1200 мм" }]);
+      assertLanded(doorBatch);
+      assertLanded(windowBatch);
+      const door = doorBatch.items[0]?.actual?.typeIds[0];
+      const window = windowBatch.items[0]?.actual?.typeIds[0];
+      assert.ok(door && window);
+
+      await saved(client);
+      const before = await modelInfo(client);
+
+      // The wall is the right one and the point is on it: nothing but the kind of the type is wrong. place_instances put a door there
+      // and said nothing of whether it cut the wall, so it does not place one.
+      for (const [what, type] of [["a door", door], ["a window", window]] as const) {
+        const refused = await refusal(client, "place_instances", {
+          items: [
+            { typeId: bed.id, pointMm: { x: 3000, y: 90000 }, levelId: w.ground.id },
+            { typeId: type.id, pointMm: { x: 3000, y: 0 }, levelId: w.ground.id, hostWallId: w.wallA },
+          ],
+        });
+        assert.match(refused.message, /place_instances item 1/, `${what}: the refusal should name the item`);
+        assert.match(refused.message, /is a door or window type, and this tool does not place those/, what);
+        assert.match(refused.message, /Use place_hosted/, what);
+        assert.ok(refused.message.includes(type.id), `${what}: the message names the type ${type.id}`);
+      }
+
+      const after = await modelInfo(client);
+      for (const category of ["OST_Furniture", "OST_Doors", "OST_Windows"]) {
+        assert.equal(countOf(after, category), countOf(before, category), category);
+      }
+      assert.equal(await isModified(client), false, "a refused call changes nothing");
+    });
+  });
+
+  it("a size written on a bare opening is refused and nothing stays loaded", async () => {
+    await withClient(async (client) => {
+      await saved(client);
+      const doorsBefore = await listTypes(client, "doors");
+
+      // The width and height of a bare opening read 0, and Revit takes any value for them and reads it back, as it does for a door panel.
+      // The opening is cut at its rough size all the same, so such a write is a size that changes nothing, and the item fails.
+      const refused = await loadFamily(client, [{ path: "Russia\\Двери\\Дверь-Проем.rfa", typeName: "0762 x 2032 мм", widthMm: 1200, heightMm: 2400 }]);
+      assert.equal(refused.committed, false, JSON.stringify(refused).slice(0, 600));
+      assert.equal(refused.items[0]?.status, "failed");
+      assert.match(refused.items[0]?.error ?? "", /nothing else in the type moved/);
+      assert.match(refused.items[0]?.error ?? "", /widthMm 1200 and heightMm 2400 for type '0762 x 2032 мм' of family 'Дверь-Проем'/);
+      assert.match(refused.items[0]?.error ?? "", /Rough Width and Rough Height/);
+      assert.deepEqual(await listTypes(client, "doors"), doorsBefore, "the row is not in the project");
+      assert.equal(await isModified(client), false);
+
+      // The same row with no size loads, and its Width and Height read 0.
+      const [row] = landed(await loadFamily(client, [{ path: "Russia\\Двери\\Дверь-Проем.rfa", typeName: "0762 x 2032 мм" }]), "created");
+      assert.equal(row?.actual.typeIds[0]?.widthMm, 0);
+      assert.equal(row?.actual.typeIds[0]?.heightMm, 0);
     });
   });
 

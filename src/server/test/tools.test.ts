@@ -716,6 +716,14 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /LEFT of the direction of the wall/);
     assert.match(description, /curtain wall/);
     assert.match(description, /fixed window cannot flip its hand/);
+    assert.match(description, /fails its item after the instance is made/);
+    assert.doesNotMatch(description, /flipHand is refused before anything changes/, "a flip that cannot be done is known only for an instance");
+    assert.match(description, /where the opening stands/);
+    assert.match(description, /the lowest of the three counts/);
+    assert.match(description, /topMm in get_elements, is no limit for a window/);
+    assert.match(description, /attach_walls/);
+    assert.match(description, /Rough Width and Rough Height/);
+    assert.match(description, /load_family refuses widthMm and heightMm for it/);
     assert.match(description, /cutsWall/);
     assert.match(description, /fromRoomId and toRoomId/);
     assert.match(description, /first instance of a type does not otherwise cut its wall/);
@@ -744,6 +752,8 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /They need typeName/);
     assert.match(description, /GOST/);
     assert.match(description, /nothing stays loaded/);
+    assert.match(description, /moves nothing else in the type/);
+    assert.match(description, /place_hosted reads its rough size/);
     assert.match(description, /reset the sizes/);
     assert.match(description, /A match is by the name of the family and not by its file/);
     assert.match(description, /cannot tell which file the family in the project came from/);
@@ -773,6 +783,8 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /compared with the request/);
     assert.match(description, /recessed ceiling light/);
     assert.match(description, /some other host than that wall fails its item/);
+    assert.match(description, /A door or window type is refused as well/);
+    assert.match(description, /use place_hosted/);
     assert.match(description, /load_family/);
   });
 

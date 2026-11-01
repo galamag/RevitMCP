@@ -18,7 +18,9 @@ namespace RevitMCP.Commands;
 /// <c>flipFacing</c> puts it on the other side. A symbol that is not active is activated and the document regenerated before the
 /// first instance, as without that the first instance of a type does not cut its wall. After the instance is made and
 /// regenerated, where it stands, how it is turned and its level are read from the model and compared with the request, and an
-/// instance that Revit put somewhere else fails the item.
+/// instance that Revit put somewhere else fails the item. A door or window type is refused before the transaction, whatever its
+/// placement type: nothing here reads the inserts of the wall, so such an instance could be left uncut with no sign of it, and
+/// <see cref="PlaceHostedCommand"/> does that and the rest.
 /// </summary>
 public sealed class PlaceInstancesCommand : ICommand
 {
@@ -146,6 +148,16 @@ public sealed class PlaceInstancesCommand : ICommand
     {
         var reader = new ItemReader(item, $"{Method} item {index}");
         var symbol = reader.FamilyType(document, "typeId");
+
+        // Nothing here reads the inserts of the wall, so a door or window placed by this tool can be left uncut with no sign of it, and its sill
+        // and its fit in the wall are not looked at. place_hosted does all of that.
+        if (symbol.Category?.BuiltInCategory is BuiltInCategory.OST_Doors or BuiltInCategory.OST_Windows)
+        {
+            throw reader.Refuse(
+                $"typeId {item.GetProperty("typeId").GetRawText()} ('{symbol.FamilyName}: {symbol.Name}') is a door or window type, and this tool does not place those. "
+                + "Use place_hosted: it checks where the opening lies in the wall, its sill, and the doors and windows already in the wall, and confirms that the opening cuts the wall.");
+        }
+
         var point = reader.Point("pointMm");
         var level = reader.Level(document, "levelId");
         var elevationMm = reader.NumberOr("elevationMm", 0);

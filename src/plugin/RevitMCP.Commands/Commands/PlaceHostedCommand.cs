@@ -13,10 +13,12 @@ namespace RevitMCP.Commands;
 /// <c>committed</c> true, an opening that runs past the end of the wall by half its width, a sill and a head that reach past the top
 /// of the wall, and openings on top of each other. So everything knowable is checked before the transaction and refused naming
 /// the item: where the opening lies along the wall and in height, what it overlaps (inserts already on the wall and earlier items
-/// of the list, in both extents), the kind of type and wall, and whether the type can flip as asked. The last needs an instance,
-/// so a call that flips places one per type in a transaction of its own and rolls it back (as the dry run of a delete does).
+/// of the list, in both extents), and the kind of type and wall. Whether a type can flip as asked is a fact of an instance and not of the
+/// type, so it is known only once an instance exists: the flip is done inside the transaction, and one that cannot be done fails its item.
 /// <c>offsetAlongWallMm</c> counts from the start of the axis of the wall to the centre of the opening, and <c>sillHeightMm</c>
-/// from the base level of the wall, whatever the base offset of the wall is. Width and height are those of the type. A symbol that
+/// from the base level of the wall, whatever the base offset of the wall is. Width and height are those of the type, or its rough ones
+/// when it reads none (<see cref="FamilySizes.OpeningMm"/>). The top of the wall is read where the opening stands: a wall that follows a roof is
+/// lower than its highest point at all but one place, and Revit takes a window through the slope with no warning. A symbol that
 /// is not active is activated and the document regenerated first, as without that the first instance of a type silently does not
 /// cut its wall. After the instance is made and regenerated, its host, place, level, sill and flips are read from the model and
 /// compared with the request, and the wall's <see cref="HostObject.FindInserts"/> must list it, or the item fails.
@@ -32,8 +34,12 @@ public sealed class PlaceHostedCommand : ICommand
     /// </summary>
     private const double EdgeToleranceMm = 0.01;
 
-    /// <summary>Ends the transaction of the flip check, which is only ever rolled back.</summary>
-    private const string CheckEnd = "A check rolls back.";
+    /// <summary>
+    /// How far in from an edge of the opening, and from the end of the wall, the top of the wall is read. On the edge itself the line
+    /// can lie on the face of a cut next to it, or on the end face of the wall, and meet nothing, or the face. It leans towards the
+    /// middle of the opening, where a wall that rises towards its ridge is higher, so it errs by at most a millimetre of slope.
+    /// </summary>
+    private const double TopInsetMm = 1;
 
     public string Method => MethodNames.PlaceHosted;
 
@@ -47,27 +53,43 @@ public sealed class PlaceHostedCommand : ICommand
             .ToList();
 
         RefuseOverlaps(document, entries);
-        RefuseFlipsThatCannot(document, entries);
 
-        return ItemBatch.Run(document, Method, entries, input => Place(document, input), element => Describe((FamilyInstance)element));
+        // Kept for the read-back, which comes after the commit and gets the element only.
+        var notes = new Dictionary<ElementId, string>();
+
+        return ItemBatch.Run(
+            document,
+            Method,
+            entries,
+            input => Place(document, input, notes),
+            element => Describe((FamilyInstance)element),
+            element => notes.TryGetValue(element.Id, out var note) ? [note] : []);
     }
 
-    private static FamilyInstance Place(Document document, HostedInput input)
+    private static FamilyInstance Place(Document document, HostedInput input, Dictionary<ElementId, string> notes)
     {
         var instance = Create(document, input);
 
+        // Whether a type can flip is a fact of an instance, and an instance is what exists only now. A flip that cannot be done fails the item, and the batch rolls back.
         if (input.FlipFacing && (!instance.CanFlipFacing || !instance.flipFacing()))
         {
-            throw new InvalidOperationException($"Revit cannot flip the facing of this instance of type {input.SymbolId}, so flipFacing cannot be done.");
+            throw new InvalidOperationException(
+                $"Type '{instance.Symbol.FamilyName}: {instance.Symbol.Name}' cannot flip its facing: Revit says so for an instance of it, so flipFacing cannot be done. Leave flipFacing out or false.");
         }
 
         if (input.FlipHand && (!instance.CanFlipHand || !instance.flipHand()))
         {
-            throw new InvalidOperationException($"Revit cannot flip the hand of this instance of type {input.SymbolId}, so flipHand cannot be done.");
+            throw new InvalidOperationException(
+                $"Type '{instance.Symbol.FamilyName}: {instance.Symbol.Name}' cannot flip its hand: Revit says so for an instance of it, as for a fixed window, so flipHand cannot be done. Leave flipHand out or false.");
         }
 
         document.Regenerate();
         Verify(instance, input);
+
+        if (input.SizeNote is { } note)
+        {
+            notes[instance.Id] = note;
+        }
 
         return instance;
     }
@@ -170,14 +192,12 @@ public sealed class PlaceHostedCommand : ICommand
                 ? throw reader.Refuse($"{typeName} is a window, so sillHeightMm is required: the height of the bottom of the opening above the base level of the wall, in millimetres. A door takes 0 when it is left out.")
                 : 0;
 
-        var (widthMm, heightMm) = ReadSize(reader, symbol, typeName);
+        var (widthMm, heightMm, sizeNote) = ReadSize(reader, symbol, typeName);
         var axis = ReadAxis(reader, wall, wallName);
         var level = document.GetElement(wall.get_Parameter(BuiltInParameter.WALL_BASE_CONSTRAINT)?.AsElementId() ?? ElementId.InvalidElementId) as Level
             ?? throw reader.Refuse($"{wallName} has no base level, so sillHeightMm has nothing to be measured from.");
         var levelMm = Units.InternalToMm(level.ProjectElevation);
         var footMm = levelMm + Units.InternalToMm(wall.get_Parameter(BuiltInParameter.WALL_BASE_OFFSET)?.AsDouble() ?? 0);
-        var topMm = WallGeometry.TopMm(wall)
-            ?? throw reader.Refuse($"{wallName} has no solid, so its top cannot be read and nothing can be checked against it.");
 
         var lengthMm = Units.InternalToMm(axis.Length);
         var extent = new Extent(offsetMm - widthMm / 2, offsetMm + widthMm / 2, levelMm + sillMm, levelMm + sillMm + heightMm);
@@ -192,11 +212,33 @@ public sealed class PlaceHostedCommand : ICommand
                 + $"The wall runs from {Format(start)} mm to {Format(end)} mm, and the opening has to lie wholly between 0 and {Units.FormatNumber(lengthMm)}.");
         }
 
+        // The top of the wall at the edge of the opening nearer the start of the wall, in its middle, and at the edge nearer its end, on the axis: the lowest of them
+        // counts. A wall cut by a roof is lower than its highest point everywhere but at the ridge, and the highest point is no limit for a window.
+        var along = new[] { extent.AlongFromMm + TopInsetMm, offsetMm, extent.AlongToMm - TopInsetMm }
+            .Select(position => Math.Clamp(position, TopInsetMm, lengthMm - TopInsetMm))
+            .ToArray();
+        var tops = WallGeometry.TopsAtMm(
+            wall,
+            along.Select(position => new XYZ(start.X + (axis.Direction.X * Units.MmToInternal(position)), start.Y + (axis.Direction.Y * Units.MmToInternal(position)), start.Z)).ToList());
+
+        if (tops.All(top => top is null))
+        {
+            throw reader.Refuse($"{wallName} has no solid where the opening would stand, so its top cannot be read and nothing can be checked against it.");
+        }
+
+        var topMm = tops.Min()!.Value;
+
         if (extent.TopMm > topMm + EdgeToleranceMm)
         {
+            var varies = tops.Any(top => top is null || Math.Abs(top.Value - topMm) > EdgeToleranceMm);
+
             throw reader.Refuse(
                 $"the opening would run from {Units.FormatNumber(sillMm)} mm to {Units.FormatNumber(extent.TopMm - levelMm)} mm above level '{level.Name}' (sillHeightMm {Units.FormatNumber(sillMm)} plus the {Units.FormatNumber(heightMm)} mm height of {typeName}), "
-                + $"but {wallName} reaches only {Units.FormatNumber(topMm - levelMm)} mm above that level, so the top of the opening is {Units.FormatNumber(extent.TopMm - topMm)} mm above the top of the wall. Lower sillHeightMm or take a lower type.");
+                + $"but {wallName} reaches only {Units.FormatNumber(topMm - levelMm)} mm above that level where the opening stands, so the top of the opening is {Units.FormatNumber(extent.TopMm - topMm)} mm above the top of the wall"
+                + (varies
+                    ? $" at its lowest. The wall is not as high everywhere, as a wall that follows a roof is not: its top is {TopText(tops[0], levelMm)} at the edge of the opening nearer the start of the wall, {TopText(tops[1], levelMm)} in the middle and {TopText(tops[2], levelMm)} at the edge nearer its end, above that level. "
+                    + "Lower sillHeightMm, or move the opening along the wall to where it is higher."
+                    : ". Lower sillHeightMm or take a lower type."));
         }
 
         if (extent.BottomMm < footMm - EdgeToleranceMm)
@@ -214,7 +256,7 @@ public sealed class PlaceHostedCommand : ICommand
         return new BatchEntry<HostedInput>(
             index,
             item,
-            new HostedInput(symbol.Id, wall.Id, level.Id, levelMm, level.Name, isWindow ? "window" : "door", point, offsetMm, sillMm, extent, flipFacing, flipHand));
+            new HostedInput(symbol.Id, wall.Id, level.Id, levelMm, level.Name, isWindow ? "window" : "door", point, offsetMm, sillMm, extent, flipFacing, flipHand, sizeNote));
     }
 
     /// <summary>Whether the type is a window. A type that is no door or window, or that does not sit in a wall, is refused.</summary>
@@ -245,17 +287,31 @@ public sealed class PlaceHostedCommand : ICommand
         return category == BuiltInCategory.OST_Windows;
     }
 
-    /// <summary>The width and the height of the type. A type that does not say them is refused: none of the checks of where the opening lies would hold.</summary>
-    private static (double WidthMm, double HeightMm) ReadSize(ItemReader reader, FamilySymbol symbol, string typeName)
+    /// <summary>
+    /// The width and the height of the opening the type cuts, and a note when they are the rough ones. A type that does not say them is refused:
+    /// none of the checks of where the opening lies would hold.
+    /// </summary>
+    private static (double WidthMm, double HeightMm, string? Note) ReadSize(ItemReader reader, FamilySymbol symbol, string typeName)
     {
-        var widthMm = SizeMm(symbol, BuiltInParameter.FAMILY_WIDTH_PARAM);
-        var heightMm = SizeMm(symbol, BuiltInParameter.FAMILY_HEIGHT_PARAM);
+        var (widthMm, heightMm, fromRough) = FamilySizes.OpeningMm(symbol);
 
-        return widthMm is > 0 && heightMm is > 0
-            ? (widthMm.Value, heightMm.Value)
-            : throw reader.Refuse(
-                $"{typeName} says no width above zero or no height above zero (width {(widthMm is { } w ? Units.FormatNumber(w) : "none")}, height {(heightMm is { } h ? Units.FormatNumber(h) : "none")}), "
-                + "so whether its opening fits the wall cannot be checked, and nothing is placed on a guess. Give the type a size in load_family, or take another type.");
+        if (widthMm is not > 0 || heightMm is not > 0)
+        {
+            string Read(BuiltInParameter which) => FamilySizes.ParameterMm(symbol, which) is { } mm ? Units.FormatNumber(mm) : "none";
+
+            throw reader.Refuse(
+                $"{typeName} says no width above zero or no height above zero: its Width reads {Read(BuiltInParameter.FAMILY_WIDTH_PARAM)} and its Height {Read(BuiltInParameter.FAMILY_HEIGHT_PARAM)}, "
+                + $"and its Rough Width {Read(BuiltInParameter.FAMILY_ROUGH_WIDTH_PARAM)} and Rough Height {Read(BuiltInParameter.FAMILY_ROUGH_HEIGHT_PARAM)}, "
+                + "so whether its opening fits the wall cannot be checked, and nothing is placed on a guess. Take another type.");
+        }
+
+        return (
+            widthMm.Value,
+            heightMm.Value,
+            fromRough
+                ? $"{typeName} reads no Width or Height above zero, so its opening is taken as its Rough Width and Rough Height: {Units.FormatNumber(widthMm.Value)} x {Units.FormatNumber(heightMm.Value)} mm. "
+                    + "The wall is cut at that size, and every check of this item used it."
+                : null);
     }
 
     /// <summary>The straight axis of the wall. A curved wall and a curtain wall are refused: offsets are measured along a straight axis, and a curtain wall takes panels, not inserts.</summary>
@@ -349,8 +405,7 @@ public sealed class PlaceHostedCommand : ICommand
             return null;
         }
 
-        var widthMm = SizeMm(symbol, BuiltInParameter.FAMILY_WIDTH_PARAM);
-        var heightMm = SizeMm(symbol, BuiltInParameter.FAMILY_HEIGHT_PARAM);
+        var (widthMm, heightMm, _) = FamilySizes.OpeningMm(symbol);
 
         if (widthMm is not > 0 || heightMm is not > 0)
         {
@@ -361,58 +416,6 @@ public sealed class PlaceHostedCommand : ICommand
         var bottomMm = Units.InternalToMm(location.Point.Z);
 
         return new Extent(alongMm - (widthMm.Value / 2), alongMm + (widthMm.Value / 2), bottomMm, bottomMm + heightMm.Value);
-    }
-
-    /// <summary>
-    /// Refuses a flip that the type cannot do. That is a fact of an instance, so one instance per type is made in a transaction of its
-    /// own and rolled back. If that check itself fails, nothing is refused here: the items run, and a flip that cannot be done fails its item.
-    /// </summary>
-    private void RefuseFlipsThatCannot(Document document, List<BatchEntry<HostedInput>> entries)
-    {
-        var asked = entries.Where(entry => entry.Input.FlipFacing || entry.Input.FlipHand).ToList();
-
-        if (asked.Count == 0)
-        {
-            return;
-        }
-
-        var able = new Dictionary<ElementId, (bool Facing, bool Hand)>();
-
-        Operation.Run(
-            document,
-            $"{Method} check",
-            scope =>
-            {
-                foreach (var sample in asked.GroupBy(entry => entry.Input.SymbolId).Select(group => group.First()))
-                {
-                    var instance = Create(document, sample.Input);
-                    document.Regenerate();
-                    able[sample.Input.SymbolId] = (instance.CanFlipFacing, instance.CanFlipHand);
-                }
-
-                scope.Abort(CheckEnd);
-            });
-
-        foreach (var entry in asked)
-        {
-            if (!able.TryGetValue(entry.Input.SymbolId, out var can))
-            {
-                continue;
-            }
-
-            var reader = new ItemReader(entry.Requested, $"{Method} item {entry.Index}");
-            var typeName = $"typeId {entry.Requested.GetProperty("typeId").GetRawText()}";
-
-            if (entry.Input.FlipFacing && !can.Facing)
-            {
-                throw reader.Refuse($"{typeName} cannot flip its facing: Revit says so for an instance of it. Leave flipFacing out or false.");
-            }
-
-            if (entry.Input.FlipHand && !can.Hand)
-            {
-                throw reader.Refuse($"{typeName} cannot flip its hand: Revit says so for an instance of it, as for a fixed window. Leave flipHand out or false.");
-            }
-        }
     }
 
     private static object Describe(FamilyInstance instance) => new
@@ -433,9 +436,8 @@ public sealed class PlaceHostedCommand : ICommand
     private static double? SillMm(FamilyInstance instance) =>
         instance.get_Parameter(BuiltInParameter.INSTANCE_SILL_HEIGHT_PARAM) is { StorageType: StorageType.Double } parameter ? Units.InternalToMm(parameter.AsDouble()) : null;
 
-    /// <summary>A size parameter of a type in millimetres, or <c>null</c> when the type has none that Revit names as such.</summary>
-    private static double? SizeMm(FamilySymbol symbol, BuiltInParameter which) =>
-        symbol.get_Parameter(which) is { StorageType: StorageType.Double } parameter ? Units.InternalToMm(parameter.AsDouble()) : null;
+    /// <summary>A height of the wall as the caller measures it, above the base level, or that there is no wall there.</summary>
+    private static string TopText(double? topMm, double levelMm) => topMm is { } top ? $"{Units.FormatNumber(top - levelMm)} mm" : "no wall";
 
     /// <summary>An extent as the caller measures it: along the wall from its start, and above the base level of the wall.</summary>
     private static string Words(Extent extent, double levelMm, string levelName) =>
@@ -470,5 +472,6 @@ public sealed class PlaceHostedCommand : ICommand
         double SillMm,
         Extent Extent,
         bool FlipFacing,
-        bool FlipHand);
+        bool FlipHand,
+        string? SizeNote);
 }
