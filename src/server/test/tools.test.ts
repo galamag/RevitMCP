@@ -57,6 +57,7 @@ const ground = { boundaryMm: floor.boundaryMm, levelId: "2", topOffsetMm: -400, 
 const family = { path: "Russia\\Мебель\\Кровати\\Кровать-Стандарт.rfa" };
 const familyRow = { path: "Russia\\Двери\\Дверь-Одинарная-Панель.rfa", typeName: "800 x 2100 мм", widthMm: 800, heightMm: 2100 };
 const instance = { typeId: "7", pointMm: { x: 1000, y: 2000 }, levelId: "2" };
+const hosted = { typeId: "7", wallId: "10", offsetAlongWallMm: 1500, sillHeightMm: 900 };
 const material = { name: "Краснодарский кирпич", colorRgb: { r: 170, g: 40, b: 35 } };
 const layer = { thicknessMm: 200, materialId: "7", function: "structure" };
 const typeItem = { category: "walls", baseTypeId: "408", name: "Стена 250 мм" };
@@ -96,6 +97,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "list_types",
         "load_family",
         "open_project",
+        "place_hosted",
         "place_instances",
         "save_project",
         "undo_last_operation",
@@ -384,6 +386,25 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["place_instances", { items: [{ ...instance, flipFacing: "true" }] }],
     ["place_instances", { items: [{ ...instance, zMm: 0 }] }],
     ["place_instances", { items: [{ ...instance, hostId: "10" }] }],
+    ["place_hosted", {}],
+    ["place_hosted", { items: [] }],
+    ["place_hosted", { items: batch(501, hosted) }],
+    ["place_hosted", { items: [{ ...hosted, typeId: undefined }] }],
+    ["place_hosted", { items: [{ ...hosted, typeId: 7 }] }],
+    ["place_hosted", { items: [{ ...hosted, typeId: "" }] }],
+    ["place_hosted", { items: [{ ...hosted, wallId: undefined }] }],
+    ["place_hosted", { items: [{ ...hosted, wallId: 10 }] }],
+    ["place_hosted", { items: [{ ...hosted, wallId: "" }] }],
+    ["place_hosted", { items: [{ ...hosted, offsetAlongWallMm: undefined }] }],
+    ["place_hosted", { items: [{ ...hosted, offsetAlongWallMm: "1500" }] }],
+    ["place_hosted", { items: [{ ...hosted, offsetAlongWallMm: null }] }],
+    ["place_hosted", { items: [{ ...hosted, sillHeightMm: "900" }] }],
+    ["place_hosted", { items: [{ ...hosted, sillHeightMm: null }] }],
+    ["place_hosted", { items: [{ ...hosted, flipFacing: "true" }] }],
+    ["place_hosted", { items: [{ ...hosted, flipHand: 1 }] }],
+    ["place_hosted", { items: [{ ...hosted, hostWallId: "10" }] }],
+    ["place_hosted", { items: [{ ...hosted, pointMm: { x: 1, y: 2 } }] }],
+    ["place_hosted", { items: [{ ...hosted, levelId: "2" }] }],
     ["attach_walls", {}],
     ["attach_walls", { items: [] }],
     ["attach_walls", { items: batch(501, attachment) }],
@@ -650,6 +671,57 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         { ...instance, elevationMm: 0, rotationDeg: 720, flipFacing: false },
       ],
     });
+  });
+
+  it("passes openings with the flips defaulted, the sill left out for a door, and a negative sill and offset kept", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+    const door = { typeId: "7", wallId: "10", offsetAlongWallMm: 1500.5 };
+
+    const result = await client.callTool({
+      name: "place_hosted",
+      arguments: { items: [hosted, door, { ...hosted, flipFacing: true, flipHand: true }, { ...hosted, offsetAlongWallMm: -10, sillHeightMm: -400.5 }] },
+    });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "place_hosted");
+    assert.deepEqual(bridge.frames[0]?.params, {
+      items: [
+        { ...hosted, flipFacing: false, flipHand: false },
+        { ...door, flipFacing: false, flipHand: false },
+        { ...hosted, flipFacing: true, flipHand: true },
+        { ...hosted, offsetAlongWallMm: -10, sillHeightMm: -400.5, flipFacing: false, flipHand: false },
+      ],
+    });
+  });
+
+  it("tells the model the truth about place_hosted", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "place_hosted")?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    assert.match(description, /500/);
+    for (const word of ["created", "failed", "rolled_back", "not attempted", "actual"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /from its START to the CENTRE of the opening/);
+    assert.match(description, /BASE LEVEL of the wall/);
+    assert.match(description, /not its foot/);
+    assert.match(description, /A door takes 0/);
+    assert.match(description, /a window without it is refused/);
+    assert.match(description, /Openings may touch but not overlap/);
+    assert.match(description, /a window above a door does not overlap/);
+    assert.match(description, /LEFT of the direction of the wall/);
+    assert.match(description, /curtain wall/);
+    assert.match(description, /fixed window cannot flip its hand/);
+    assert.match(description, /cutsWall/);
+    assert.match(description, /fromRoomId and toRoomId/);
+    assert.match(description, /first instance of a type does not otherwise cut its wall/);
+    assert.match(description, /list_types with doors or windows/);
+    assert.match(description, /place_instances/);
+    assert.match(description, /load_family/);
   });
 
   it("tells the model the truth about load_family", async (t) => {

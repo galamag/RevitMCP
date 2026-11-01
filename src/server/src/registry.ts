@@ -689,6 +689,48 @@ export const tools: readonly ToolDefinition[] = [
     },
   },
   {
+    name: "place_hosted",
+    description:
+      "Places doors and windows in straight walls of the active project, each cutting an opening in its wall. Take typeId from list_types with doors or windows, or from actual.typeIds of load_family, and wallId from create_walls or get_elements with walls. " +
+      "A type that is no door or window is refused, and so is one that hangs on a floor, a ceiling or a roof, which its family says in its Host parameter; what hangs on a wall without cutting it goes through place_instances. " +
+      "offsetAlongWallMm is the distance in millimetres along the wall from its START to the CENTRE of the opening. The start is the first end of the centre line, startMm of create_walls and actual.startMm, so on a wall drawn from right to left the offset counts from the right. " +
+      "The whole opening must lie in the wall: the offset minus half the width of the type is at least 0, and the offset plus half the width is at most the length of the wall. An opening that ends exactly at the end of the wall is allowed. " +
+      "sillHeightMm is the height of the bottom of the opening, in millimetres, above the BASE LEVEL of the wall: the level the wall stands on, and not its foot, so on a wall with a base offset of -400 a sill of 0 is 400 above the foot. " +
+      "A door takes 0 when sillHeightMm is left out. A window must be given one, and a window without it is refused. The sill that the family keeps is not used, for a door either. " +
+      "The top of the opening, the sill plus the height of the type, must not pass the top of the wall, and its bottom must not lie below the foot of the wall. " +
+      "For a wall whose top follows a roof the top is its highest point, so read topMm in get_elements and keep clear of the part that the roof cuts. " +
+      "The width and the height come from the type, as the Width and Height that Revit names as such: a type that does not say them is refused, and a row of a type catalog that was loaded without widthMm and heightMm has the size of its family, " +
+      "so give the size in load_family. " +
+      "Openings may touch but not overlap. An opening that overlaps a door or window already in the same wall, or an earlier item of the same call, is refused. It counts only when the two share both a stretch along the wall and a stretch of height, so a window above a door does not overlap it. " +
+      "Everything that can be known is checked before anything changes, and the call is refused naming the item and saying what was found: the length of the wall, its top, the element it overlaps. " +
+      "That includes a curved wall and a curtain wall, which are refused by name, and a flipFacing or flipHand that the type cannot do. Revit would accept a doorway past the end of the wall, above its top or on top of another with no warning, which is why these are checked here. " +
+      "The opening faces the LEFT of the direction of the wall, from its start to its end, whatever side of the wall the point lies on. For a wall drawn counter-clockwise round a house that is the inside, and the door swing lies on that side. " +
+      "flipFacing true puts it on the other side. flipHand true turns its hand to the other direction along the wall, which for a door puts the hinges at the other end. A type can refuse a flip: a fixed window cannot flip its hand, and then flipHand is refused before anything changes. " +
+      "A type that is not active is activated and the model regenerated before its first instance, because the first instance of a type does not otherwise cut its wall. " +
+      "After each instance is made, its host, its place along the wall, its sill, its level and its flips are read from the model and compared with the request, and the wall must list it among its inserts. " +
+      "An instance that Revit put elsewhere or that does not cut the wall fails its item, and the batch rolls back. " +
+      "actual is { hostId, offsetAlongWallMm, sillHeightMm, facingFlipped, handFlipped, fromRoomId, toRoomId, cutsWall }, read from the model after the commit: offsetAlongWallMm is the distance from the start of the wall to the centre of the opening, " +
+      "sillHeightMm is the sill above the base level of the wall, facingFlipped and handFlipped say whether the flips were done, and cutsWall says that the wall lists the instance among its inserts. " +
+      "fromRoomId and toRoomId are the rooms the opening leads from and to, and they are null while there is no room on that side. " +
+      BATCH_RULES +
+      " Related tools: load_family, list_types, create_walls, get_elements, place_instances, delete_elements, undo_last_operation, get_view_snapshot, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.strictObject({
+          typeId: elementId("The id of a door or window type, from list_types with doors or windows or from actual.typeIds of load_family"),
+          wallId: elementId("The id of a straight wall, from create_walls or get_elements with walls"),
+          offsetAlongWallMm: z.number().describe("The distance in millimetres from the start of the wall to the centre of the opening, along the wall."),
+          sillHeightMm: z
+            .number()
+            .optional()
+            .describe("The height of the bottom of the opening above the base level of the wall, in millimetres. Optional for a door, which takes 0, and required for a window."),
+          flipFacing: z.boolean().default(false).describe("Puts the opening on the other side of the wall: by default it faces the left of the direction from the start of the wall to its end."),
+          flipHand: z.boolean().default(false).describe("Turns the hand of the door or window to the other direction along the wall; for a door the hinges go to the other end. Refused for a type that cannot flip its hand."),
+        }),
+      ),
+    },
+  },
+  {
     name: "attach_walls",
     description:
       "Attaches the tops of walls to a roof, so that each wall follows the underside of the roof. A wall below the roof rises to it, which is what fills the gable ends of a gable roof, " +

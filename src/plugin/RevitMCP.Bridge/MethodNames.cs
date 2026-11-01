@@ -27,6 +27,7 @@ public static class MethodNames
     public const string CreateGround = "create_ground";
     public const string LoadFamily = "load_family";
     public const string PlaceInstances = "place_instances";
+    public const string PlaceHosted = "place_hosted";
     public const string AttachWalls = "attach_walls";
     public const string DeleteElements = "delete_elements";
     public const string UndoLastOperation = "undo_last_operation";
@@ -59,6 +60,7 @@ public static class MethodNames
         CreateGround,
         LoadFamily,
         PlaceInstances,
+        PlaceHosted,
         AttachWalls,
         DeleteElements,
         UndoLastOperation,

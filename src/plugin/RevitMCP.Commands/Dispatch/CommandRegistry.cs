@@ -51,6 +51,7 @@ public sealed class CommandRegistry
         new CreateGroundCommand(),
         new LoadFamilyCommand(),
         new PlaceInstancesCommand(),
+        new PlaceHostedCommand(),
         new AttachWallsCommand(),
         new DeleteElementsCommand(),
         new UndoLastOperationCommand(undoTracker),

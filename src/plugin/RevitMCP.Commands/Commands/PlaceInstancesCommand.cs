@@ -218,7 +218,7 @@ public sealed class PlaceInstancesCommand : ICommand
     /// anything in Revit, so a family author may leave it unset. It can refuse before the transaction, but it cannot confirm: that
     /// is for the host of the instance, read after it is made.
     /// </summary>
-    private static FamilyHostingBehavior? HostedOnOther(Family family)
+    internal static FamilyHostingBehavior? HostedOnOther(Family family)
     {
         if (family.get_Parameter(BuiltInParameter.FAMILY_HOSTING_BEHAVIOR) is not { StorageType: StorageType.Integer } parameter)
         {

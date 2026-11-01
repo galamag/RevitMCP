@@ -25,6 +25,7 @@
     "create_ground",
     "load_family",
     "place_instances",
+    "place_hosted",
     "attach_walls",
     "delete_elements",
     "undo_last_operation",
