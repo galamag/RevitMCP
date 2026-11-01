@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace RevitMCP.Bridge;
 
 /// <summary>
@@ -7,7 +5,7 @@ namespace RevitMCP.Bridge;
 /// a path. Names Windows would quietly rewrite are refused, because the file on disk would then not be the one the
 /// checks here looked at.
 /// </summary>
-public static partial class TestFolder
+public static class TestFolder
 {
     private const string Extension = ".rvt";
 
@@ -16,8 +14,6 @@ public static partial class TestFolder
     /// (<c>.0001</c>), to fit too. Without it Save fails, so a project that cannot be saved later is refused now.
     /// </summary>
     private const int MaxPathLength = 254;
-
-    private static readonly char[] ForbiddenCharacters = Path.GetInvalidFileNameChars();
 
     /// <summary>The full path of the folder, with no trailing separator.</summary>
     public static string Root { get; } = Path.Combine(
@@ -51,51 +47,15 @@ public static partial class TestFolder
     /// Tells whether <paramref name="path"/> is a fully qualified path of something below <see cref="Root"/>, not the
     /// folder itself. Case-insensitive, as Windows is. A path that fails to qualify, or that Windows would rewrite, is not.
     /// </summary>
-    public static bool Contains(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || path.EndsWith('.') || path.EndsWith(' '))
-        {
-            return false;
-        }
-
-        string full;
-        try
-        {
-            full = Path.GetFullPath(path);
-        }
-        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return false;
-        }
-
-        var prefix = Root + Path.DirectorySeparatorChar;
-
-        return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            && full[prefix.Length..].Split(Path.DirectorySeparatorChar).All(segment => FindProblem(segment) is null);
-    }
+    public static bool Contains(string path) => WindowsNames.TryGetNamesBelow(Root, path, out _);
 
     /// <summary>Says what is wrong with one path segment, or returns <c>null</c> when Windows would keep it as it is.</summary>
-    private static string? FindProblem(string? segment)
+    private static string? FindProblem(string? segment) => WindowsNames.Check(segment) switch
     {
-        if (string.IsNullOrWhiteSpace(segment))
-        {
-            return "it is empty";
-        }
-
-        if (segment.IndexOfAny(ForbiddenCharacters) >= 0)
-        {
-            return "it must be a bare file name, so no folders, drives or characters that Windows forbids in a file name";
-        }
-
-        if (segment != segment.Trim() || segment.EndsWith('.'))
-        {
-            return "it starts or ends with a space or ends with a dot, which Windows would change";
-        }
-
-        return DeviceName().IsMatch(segment) ? "it is a Windows device name" : null;
-    }
-
-    /// <summary>Windows reserves these names whatever the extension, in any case.</summary>
-    [GeneratedRegex(@"^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(COM|LPT)[0-9¹²³])(\..*)?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex DeviceName();
+        NameProblem.Empty => "it is empty",
+        NameProblem.ForbiddenCharacter => "it must be a bare file name, so no folders, drives or characters that Windows forbids in a file name",
+        NameProblem.SpaceOrDotAtTheEnd => "it starts or ends with a space or ends with a dot, which Windows would change",
+        NameProblem.DeviceName => "it is a Windows device name",
+        _ => null,
+    };
 }

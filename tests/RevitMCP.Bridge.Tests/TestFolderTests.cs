@@ -94,6 +94,8 @@ public class TestFolderTests
     [InlineData("CONIN$")]
     [InlineData("CONOUT$")]
     [InlineData("NUL.rvt")]
+    [InlineData("NUL .rvt")]
+    [InlineData("com1   .rvt")]
     public void Rejects_DeviceName(string name) => AssertRefused(name);
 
     [Theory]
@@ -208,6 +210,7 @@ public class TestFolderTests
 
     [Theory]
     [InlineData("CON.rvt")]
+    [InlineData("NUL .rvt")]
     [InlineData("nul")]
     [InlineData(@"COM1\x.rvt")]
     [InlineData("x.rvt.")]

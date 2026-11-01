@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace RevitMCP.Bridge;
 
 /// <summary>
@@ -7,13 +5,11 @@ namespace RevitMCP.Bridge;
 /// set that is installed. A client names a file below it, never a path of its own, and only a family file (<c>.rfa</c>).
 /// Names Windows would quietly rewrite are refused, because the file on disk would then not be the one the checks looked at.
 /// </summary>
-public static partial class LibraryFolder
+public static class LibraryFolder
 {
     private const string Extension = ".rfa";
 
     private static readonly char[] Separators = ['\\', '/'];
-
-    private static readonly char[] ForbiddenCharacters = Path.GetInvalidFileNameChars();
 
     /// <summary>The full path of the library, with no trailing separator.</summary>
     public static string Root { get; } = Path.Combine(
@@ -27,7 +23,8 @@ public static partial class LibraryFolder
     /// Returns the full path of the family file called <paramref name="relativePath"/>, which is relative to <see cref="Root"/>
     /// and may use <c>\</c> or <c>/</c>. It holds no drive, no <c>.</c> and no <c>..</c>, and not even a <c>..</c> that would
     /// stay inside the library. The file name ends in <c>.rfa</c>, in any case. Cyrillic and spaces are kept exactly as given.
-    /// It is not looked up on disk: that the file exists is for the caller to say.
+    /// It is not looked up on disk, so the names are as they were spelled, in any case and perhaps as 8.3 short names:
+    /// that the file exists, and what it is called on disk, is for <see cref="FindOnDisk(string)"/> to say.
     /// </summary>
     /// <exception cref="RequestFailedException">With <see cref="JsonRpcCodes.InvalidParams"/>, when the path is refused.</exception>
     public static string Resolve(string relativePath)
@@ -49,33 +46,50 @@ public static partial class LibraryFolder
     /// Tells whether <paramref name="path"/> is a fully qualified path of a family file below <see cref="Root"/>, not the folder
     /// itself. Case-insensitive, as Windows is. A path that fails to qualify, or that Windows would rewrite, is not.
     /// </summary>
-    public static bool Contains(string path)
+    public static bool Contains(string path) => Contains(Root, path);
+
+    /// <summary>
+    /// The real path of the family file that <paramref name="fullPath"/> names, with every folder and the file called what it is
+    /// called on disk: the case as stored, and a short name such as <c>DAA6~1</c> as the long name it stands for. Windows takes
+    /// all these spellings for one file, so a family name taken from the spelling given would differ from the one Revit makes
+    /// of the file. <c>null</c> when the path is outside the library or no such file is there.
+    /// </summary>
+    public static string? FindOnDisk(string fullPath) => FindOnDisk(Root, fullPath);
+
+    internal static bool Contains(string root, string path) =>
+        WindowsNames.TryGetNamesBelow(root, path, out var names) && IsFamilyFileName(names[^1]);
+
+    internal static string? FindOnDisk(string root, string fullPath)
     {
-        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || path.EndsWith('.') || path.EndsWith(' '))
+        // The short names are expanded in here, by Path.GetFullPath, and the case is the one given.
+        if (!WindowsNames.TryGetNamesBelow(root, fullPath, out var names) || !IsFamilyFileName(names[^1]))
         {
-            return false;
+            return null;
         }
 
-        string full;
         try
         {
-            full = Path.GetFullPath(path);
+            var current = root;
+            foreach (var name in names)
+            {
+                var stored = Directory.EnumerateFileSystemEntries(current)
+                    .Select(entry => Path.GetFileName(entry))
+                    .FirstOrDefault(entry => string.Equals(entry, name, StringComparison.OrdinalIgnoreCase));
+
+                if (stored is null)
+                {
+                    return null;
+                }
+
+                current = Path.Combine(current, stored);
+            }
+
+            return File.Exists(current) ? current : null;
         }
-        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return false;
+            return null;
         }
-
-        var prefix = Root + Path.DirectorySeparatorChar;
-
-        if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var segments = full[prefix.Length..].Split(Path.DirectorySeparatorChar);
-
-        return segments.All(segment => FindSegmentProblem(segment) is null) && IsFamilyFileName(segments[^1]);
     }
 
     private static RequestFailedException Refuse(string? path, string problem) =>
@@ -104,7 +118,7 @@ public static partial class LibraryFolder
                 return $"'{segment}' is not allowed anywhere in it, as it must not leave {Root}";
             }
 
-            if (FindSegmentProblem(segment) is { } problem)
+            if (Describe(segment) is { } problem)
             {
                 return problem;
             }
@@ -117,28 +131,13 @@ public static partial class LibraryFolder
     private static bool IsFamilyFileName(string name) =>
         name.Length > Extension.Length && name.EndsWith(Extension, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Says what is wrong with one folder or file name, or returns <c>null</c> when Windows would keep it as it is.</summary>
-    private static string? FindSegmentProblem(string segment)
+    /// <summary>Says in words what is wrong with one folder or file name, or returns <c>null</c> when Windows would keep it as it is.</summary>
+    private static string? Describe(string segment) => WindowsNames.Check(segment) switch
     {
-        if (string.IsNullOrWhiteSpace(segment))
-        {
-            return "a folder or file name in it is empty";
-        }
-
-        if (segment.IndexOfAny(ForbiddenCharacters) >= 0)
-        {
-            return $"'{segment}' holds a character that Windows forbids in a name, such as : * ? \" < > |";
-        }
-
-        if (segment != segment.Trim() || segment.EndsWith('.'))
-        {
-            return $"'{segment}' starts or ends with a space or ends with a dot, which Windows would change";
-        }
-
-        return DeviceName().IsMatch(segment) ? $"'{segment}' is a Windows device name" : null;
-    }
-
-    /// <summary>Windows reserves these names whatever the extension, in any case.</summary>
-    [GeneratedRegex(@"^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(COM|LPT)[0-9¹²³])(\..*)?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex DeviceName();
+        NameProblem.Empty => "a folder or file name in it is empty",
+        NameProblem.ForbiddenCharacter => $"'{segment}' holds a character that Windows forbids in a name, such as : * ? \" < > |",
+        NameProblem.SpaceOrDotAtTheEnd => $"'{segment}' starts or ends with a space or ends with a dot, which Windows would change",
+        NameProblem.DeviceName => $"'{segment}' is a Windows device name",
+        _ => null,
+    };
 }

@@ -132,6 +132,14 @@ public sealed class PlaceInstancesCommand : ICommand
         {
             throw new InvalidOperationException($"Revit put the instance on level {instance.LevelId} and not on level {level.Id} ('{level.Name}').");
         }
+
+        // Live Revit: a ceiling light given a wall as its host is committed with no error, at the point asked for, and is not hosted by the wall.
+        if (input.HostId is { } hostId && (instance.Host is null || instance.Host.Id != hostId))
+        {
+            throw new InvalidOperationException(
+                $"Revit made the instance, but it is hosted by {(instance.Host is null ? "nothing" : $"element {instance.Host.Id}")} and not by wall {hostId}, "
+                + "so the family does not hang on a wall. The wall is not its host.");
+        }
     }
 
     private BatchEntry<PlaceInput> ReadInstance(Document document, JsonElement item, int index)
@@ -178,6 +186,12 @@ public sealed class PlaceInstancesCommand : ICommand
                 break;
 
             case FamilyPlacementType.OneLevelBasedHosted:
+                if (HostedOnOther(symbol.Family) is { } other)
+                {
+                    throw reader.Refuse(
+                        $"{name} hangs on a {other.ToString().ToLowerInvariant()}, as its family says, and not on a wall, so hostWallId cannot host it. This tool places only what hangs on a wall.");
+                }
+
                 if (host is null)
                 {
                     throw reader.Refuse(
@@ -196,6 +210,24 @@ public sealed class PlaceInstancesCommand : ICommand
                     $"{name} has the placement type {symbol.Family.FamilyPlacementType}, which this tool does not handle. "
                     + $"It places families of the types {FamilyPlacementType.OneLevelBased} and {FamilyPlacementType.OneLevelBasedHosted}.");
         }
+    }
+
+    /// <summary>
+    /// The kind of host the family says it hangs on, when that is a floor, a ceiling or a roof, and <c>null</c> for a wall and for
+    /// a family that says nothing. RevitAPI.xml calls <see cref="FamilyHostingBehavior"/> informative only: it does not affect
+    /// anything in Revit, so a family author may leave it unset. It can refuse before the transaction, but it cannot confirm: that
+    /// is for the host of the instance, read after it is made.
+    /// </summary>
+    private static FamilyHostingBehavior? HostedOnOther(Family family)
+    {
+        if (family.get_Parameter(BuiltInParameter.FAMILY_HOSTING_BEHAVIOR) is not { StorageType: StorageType.Integer } parameter)
+        {
+            return null;
+        }
+
+        var behavior = (FamilyHostingBehavior)parameter.AsInteger();
+
+        return behavior is FamilyHostingBehavior.Floor or FamilyHostingBehavior.Ceiling or FamilyHostingBehavior.Roof ? behavior : null;
     }
 
     /// <summary>

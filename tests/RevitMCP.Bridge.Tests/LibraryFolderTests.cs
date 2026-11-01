@@ -117,6 +117,10 @@ public class LibraryFolderTests
     [InlineData(@"Russia\COM1.rfa")]
     [InlineData(@"Russia\lpt9.rfa")]
     [InlineData(@"Russia\CONIN$.rfa")]
+    [InlineData("NUL .rfa")]
+    [InlineData(@"Russia\NUL .rfa")]
+    [InlineData(@"Russia\com1   .rfa")]
+    [InlineData(@"nul \x.rfa")]
     public void Rejects_DeviceName(string path) => AssertRefused(path);
 
     [Theory]
@@ -226,6 +230,12 @@ public class LibraryFolderTests
     [InlineData(" ")]
     [InlineData(null)]
     public void Contains_RejectsEmptyPath(string? path) => Assert.False(LibraryFolder.Contains(path!));
+
+    [Theory]
+    [InlineData("NUL .rfa")]
+    [InlineData("Russia/COM1  .rfa")]
+    public void Contains_RejectsDeviceNameWithSpacesBeforeTheDot(string relative) =>
+        Assert.False(LibraryFolder.Contains(LibraryFolder.Root + @"\" + relative));
 
     [Fact]
     public void Root_IsTheRussianLibraryInProgramData()

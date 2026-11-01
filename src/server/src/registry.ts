@@ -608,6 +608,10 @@ export const tools: readonly ToolDefinition[] = [
       "Without typeName the whole family loads, with every type it has. With typeName only that type loads, and it is matched exactly: a type stored in the family, or a row of its type catalog, " +
       "which is the first column of the .txt file that has the name of the .rfa and lies beside it. A name that is neither fails the item, and the batch rolls back. " +
       "A family or a type that the project holds already, matched by the name of the family and the exact name of the type, is not loaded again: it gives status already_existed, and it is left as it is, because a reload would reset the sizes written on it. " +
+      "A match is by the name of the family and not by its file. The name is taken from the file as it is on disk, so the same file spelled in lower case, or with the short names Windows makes of long ones, is the same family and not a second one, which Revit would make of a name in another case. " +
+      "Another library file with the name of a family that is in the project is not loaded: a whole-family item for it gives already_existed with the types of the family that is there, " +
+      "and an item with a typeName that the project does not hold fails, because Revit adds a type to a family only from the file that family came from (rows of AISC 15.0 into the family of AISC 14.1), and nothing changes. " +
+      "This tool cannot tell which file the family in the project came from. " +
       "When every item already exists, nothing changes and no Undo step is added. already_existed still stands when the batch fails. " +
       "A family with a catalog that is already loaded, whole or in part, is reported as it is: name a row in typeName to load a row that is not there yet. " +
       "Loading a row of a family that is in the project already adds that row only, and leaves the other rows as they are, sizes included. " +
@@ -660,6 +664,7 @@ export const tools: readonly ToolDefinition[] = [
       "The family decides how it is placed, and Revit names that its placement type. A family that stands on a level, such as a bed, a table, a toilet that is not on the wall or a tree, takes no hostWallId and no flipFacing. " +
       "A family that hangs on a wall, such as a sink, a bath or a wall-hung toilet, needs hostWallId, the id of a wall from create_walls or get_elements with walls, and a call without it is refused before anything changes, " +
       "because Revit would otherwise put it at a wrong place with no geometry and say nothing. Such an instance takes its direction from the wall, so rotationDeg is refused for it. " +
+      "A family that hangs on something else, such as a recessed ceiling light, which the family says in its Host parameter, is refused before anything changes, and an instance that Revit made with some other host than that wall fails its item. " +
       "It stands on the axis of the wall, at the point of the axis nearest to pointMm, so a pointMm beside the wall is moved onto it and the item carries a warning that says by how much. " +
       "Its body lies on one side of the wall, the left of the direction from the start of the wall to its end, and flipFacing true puts it on the other side. " +
       "The height must be one the wall reaches, or the item is refused: a wall on another level is the usual cause, so check levelId. " +

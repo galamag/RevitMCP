@@ -26,6 +26,13 @@ public sealed class LoadFamilyCommand : ICommand
     /// <summary>Two sizes closer than this are the same one: the noise of converting units.</summary>
     private const double SameSizeMm = 0.01;
 
+    /// <summary>
+    /// How family names are compared, everywhere: exactly. Revit keeps family names case-sensitive (live: the file spelled in lower case
+    /// made a second family, with the types of the file loaded again), and the name here is the file name as stored on disk, never the
+    /// spelling a caller gave, so an exact match is the match Revit makes.
+    /// </summary>
+    private static readonly StringComparer FamilyNames = StringComparer.Ordinal;
+
     public string Method => MethodNames.LoadFamily;
 
     public bool NeedsDocument => true;
@@ -58,16 +65,22 @@ public sealed class LoadFamilyCommand : ICommand
 
         if (input.TypeName is { } typeName)
         {
-            var held = TypesHeld(document, input.FamilyName);
+            var held = FindFamily(document, input.FamilyName);
+            var heldTypes = held is null ? [] : new HashSet<ElementId>(held.GetFamilySymbolIds());
 
             if (!document.LoadFamilySymbol(input.FullPath, typeName, out var symbol) || symbol is null)
             {
+                // Live Revit: a type of another file with the name of a family that is in the project is not added to it, whether or not
+                // the catalog has the row (rows of AISC 15.0 into the family of AISC 14.1), and Revit says nothing of why.
                 throw new InvalidOperationException(
-                    $"Revit loaded nothing for type '{typeName}' of {input.FileName}: it is neither a type stored in the family nor a row of its type catalog. "
-                    + "The first column of the .txt beside the .rfa holds the names of the rows.");
+                    held is null
+                        ? $"Revit loaded nothing for type '{typeName}' of {input.FileName}: it is neither a type stored in the family nor a row of its type catalog. "
+                            + "The first column of the .txt beside the .rfa holds the names of the rows."
+                        : $"Revit loaded nothing for type '{typeName}' of {input.FileName}. The project holds a family called '{held.Name}' already, and Revit adds a type to it only from the file that family came from. "
+                            + "So either typeName is not a type of this file (stored in the family, or a row of its type catalog), or the family came from another library file of the same name, and this tool cannot tell which file a family came from.");
             }
 
-            if (held.Contains(symbol.Id))
+            if (heldTypes.Contains(symbol.Id))
             {
                 // The look-up before the transaction is exact, and Revit's may not be. A reload resets the sizes written on the type, and rolling back undoes that.
                 throw new InvalidOperationException(
@@ -160,12 +173,16 @@ public sealed class LoadFamilyCommand : ICommand
             heightMm,
             File.Exists(Path.ChangeExtension(fullPath, CatalogExtension)));
 
-        var existing = families.FirstOrDefault(family => family.Name == input.FamilyName);
+        var existing = families.FirstOrDefault(family => FamilyNames.Equals(family.Name, input.FamilyName));
 
         return new BatchEntry<LoadInput>(index, item, input, existing is null ? null : ReportExisting(document, existing, input, index, item));
     }
 
-    /// <summary>The full path inside the library, of a file that exists. What is not that is refused here, naming the item.</summary>
+    /// <summary>
+    /// The path inside the library, of a file that exists, with every name as it is on disk: Windows takes a path in lower case or
+    /// with 8.3 short names for the same file, and the name of the family follows the file name as stored. What is not a file of the
+    /// library is refused here, naming the item.
+    /// </summary>
     private static string ResolvePath(ItemReader reader)
     {
         var path = reader.Text("path");
@@ -180,9 +197,8 @@ public sealed class LoadFamilyCommand : ICommand
             throw reader.Refuse(e.Message);
         }
 
-        return File.Exists(fullPath)
-            ? fullPath
-            : throw reader.Refuse($"path '{path}' is not a file of the library: there is no such file in {LibraryFolder.Root}.");
+        return LibraryFolder.FindOnDisk(fullPath)
+            ?? throw reader.Refuse($"path '{path}' is not a file of the library: there is no such file in {LibraryFolder.Root}.");
     }
 
     private static string ReadTypeName(ItemReader reader)
@@ -207,7 +223,7 @@ public sealed class LoadFamilyCommand : ICommand
     /// </summary>
     private void RefuseRepeats(List<BatchEntry<LoadInput>> entries)
     {
-        foreach (var family in entries.GroupBy(entry => entry.Input.FamilyName, StringComparer.OrdinalIgnoreCase))
+        foreach (var family in entries.GroupBy(entry => entry.Input.FamilyName, FamilyNames))
         {
             var items = family.ToList();
 
@@ -343,7 +359,13 @@ public sealed class LoadFamilyCommand : ICommand
         var holds = width is null || height is null
             ? "holds the sizes of the family itself"
             : $"is {Units.FormatNumber(width.Value)} x {Units.FormatNumber(height.Value)} mm, the size of the family itself";
-        var advice = width is null && height is null ? string.Empty : " Give widthMm and heightMm to set the size.";
+
+        // Advice that would fail the next call is no advice: the size of a GOST door is computed by the family and cannot be written.
+        var advice = CanWrite(symbol, BuiltInParameter.FAMILY_WIDTH_PARAM) && CanWrite(symbol, BuiltInParameter.FAMILY_HEIGHT_PARAM)
+            ? " Give widthMm and heightMm to set the size."
+            : width is not null && height is not null
+                ? " The family computes this size itself, so it cannot be set."
+                : string.Empty;
 
         return
         [
@@ -351,11 +373,9 @@ public sealed class LoadFamilyCommand : ICommand
         ];
     }
 
-    /// <summary>The ids of the types the project holds of the family called <paramref name="familyName"/>, none when it holds no such family.</summary>
-    private static HashSet<ElementId> TypesHeld(Document document, string familyName) =>
-        new FilteredElementCollector(document).OfClass(typeof(Family)).Cast<Family>().FirstOrDefault(family => family.Name == familyName) is { } found
-            ? [.. found.GetFamilySymbolIds()]
-            : [];
+    /// <summary>The family the project holds under <paramref name="familyName"/>, or <c>null</c>.</summary>
+    private static Family? FindFamily(Document document, string familyName) =>
+        new FilteredElementCollector(document).OfClass(typeof(Family)).Cast<Family>().FirstOrDefault(family => FamilyNames.Equals(family.Name, familyName));
 
     private static List<FamilySymbol> SymbolsOf(Document document, Family family) =>
         family.GetFamilySymbolIds()
@@ -364,6 +384,10 @@ public sealed class LoadFamilyCommand : ICommand
             .OrderBy(symbol => symbol.Name, StringComparer.Ordinal)
             .ThenBy(symbol => symbol.Id.Value)
             .ToList();
+
+    /// <summary>Whether the type has this size parameter and it can be written.</summary>
+    private static bool CanWrite(FamilySymbol symbol, BuiltInParameter which) =>
+        symbol.get_Parameter(which) is { StorageType: StorageType.Double, IsReadOnly: false };
 
     /// <summary>A size parameter of a type in millimetres, or <c>null</c> when the type has none that Revit names as such.</summary>
     private static double? SizeMm(FamilySymbol symbol, BuiltInParameter which) =>

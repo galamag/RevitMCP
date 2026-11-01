@@ -673,6 +673,9 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /GOST/);
     assert.match(description, /nothing stays loaded/);
     assert.match(description, /reset the sizes/);
+    assert.match(description, /A match is by the name of the family and not by its file/);
+    assert.match(description, /cannot tell which file the family in the project came from/);
+    assert.match(description, /only from the file that family came from/);
     assert.match(description, /typeIds/);
     assert.match(description, /place_instances/);
   });
@@ -696,6 +699,8 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /flipFacing/);
     assert.match(description, /placement type/);
     assert.match(description, /compared with the request/);
+    assert.match(description, /recessed ceiling light/);
+    assert.match(description, /some other host than that wall fails its item/);
     assert.match(description, /load_family/);
   });
 

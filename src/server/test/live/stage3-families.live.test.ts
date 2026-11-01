@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -120,6 +121,11 @@ const WC = "Russia\\Сантехника\\Архитектурные\\Прибо
 const SINK = "Russia\\Сантехника\\Архитектурные\\Приборы\\Раковины\\Раковина-Одиночная-2D.rfa";
 const BATH = "Russia\\Сантехника\\Архитектурные\\Приборы\\Ванны\\Ванна-Прямоугольная-3D.rfa";
 const COLUMN = "Russia\\Колонны\\Колонна из деревянного бруса.rfa";
+/** A recessed ceiling light: a hosted family whose host is a ceiling, and not a wall. */
+const CEILING_LIGHT = "Russia\\Освещение\\Архитектурные\\Внутренний\\Локальный светильник - Встроенный накаливания.rfa";
+/** The same family in two versions of a steel library: two files with one name, whose catalogs hold some rows of their own. */
+const STEEL_FRAME_A = "Russia\\Каркас несущий\\Сталь\\AISC 14.1\\HSS Квадратный.rfa";
+const STEEL_FRAME_B = "Russia\\Каркас несущий\\Сталь\\AISC 15.0\\HSS Квадратный.rfa";
 /** Two different files of the library with one name, in two folders. */
 const STEEL_COLUMN_BELARUS = "Belarus\\Несущие конструкции\\Колонны\\Сталь\\Специально для Беларуси\\I-образная колонна.rfa";
 const STEEL_COLUMN_UKRAINE = "Ukraine\\Несущие конструкции\\Колонны\\Сталь\\Специально для Украины\\I-образная колонна.rfa";
@@ -226,6 +232,13 @@ async function catalogRows(family: string): Promise<string[]> {
   const separator = lines[0]?.[0] ?? ",";
 
   return lines.slice(1).map((line) => line.split(separator)[0] ?? "");
+}
+
+/** The 8.3 short form of a path, as Windows gives it to cmd: the names that Windows makes of long ones, such as DAA6~1. */
+function shortForm(longPath: string): string {
+  const command = `for %I in ("${longPath}") do @echo %~sI`;
+
+  return spawnSync("cmd.exe", ["/d", "/s", "/c", `"${command}"`], { encoding: "latin1", windowsVerbatimArguments: true }).stdout.trim();
 }
 
 /** The type of a family a call loaded, by name. */
@@ -517,9 +530,81 @@ describe("stage 3 live checks: families and instances", { timeout: 900_000 }, ()
       const pair = landed(batch, "created");
       assert.equal(pair[0]?.actual.familyId, family.actual.familyId, "both rows are in the one family");
       assert.equal(pair[1]?.actual.familyId, family.actual.familyId);
+
+      // The read-back of a call comes after the whole call, so the first row is read after the second was loaded. The second load leaves it alone.
+      const firstOfPair = typeNamed(pair[0]!.actual, "600 x 1350 мм");
+      const secondOfPair = typeNamed(pair[1]!.actual, "600 x 1650 мм");
+      assertNear(firstOfPair.widthMm, 600, "the first row of the pair, width", SIZE_NEAR_MM);
+      assertNear(firstOfPair.heightMm, 1350, "the first row of the pair, height, read after the second row was loaded", SIZE_NEAR_MM);
+      assertNear(secondOfPair.widthMm, 600, "the second row of the pair, width", SIZE_NEAR_MM);
+      assertNear(secondOfPair.heightMm, 1650, "the second row of the pair, height", SIZE_NEAR_MM);
+      assert.deepEqual(pair[0]?.warnings, []);
+      assert.deepEqual(pair[1]?.warnings, []);
+
       const [all] = landed(await loadFamily(client, [{ path: WINDOW }]), "already_existed");
       assert.equal(all!.actual.typeIds.length, 6, "the three rows of this test, the plain row of the last one, and the two of this call");
       assertNear(typeNamed(all!.actual, "600 x 1200 мм").heightMm, 1200, "still the first row's height", SIZE_NEAR_MM);
+      assertNear(typeNamed(all!.actual, "600 x 1350 мм").heightMm, 1350, "the first row of the pair, read again", SIZE_NEAR_MM);
+      assertNear(typeNamed(all!.actual, "600 x 1650 мм").heightMm, 1650, "the second row of the pair, read again", SIZE_NEAR_MM);
+    });
+  });
+
+  it("the same file in lower case or with short names is the family that is loaded", async () => {
+    await withClient(async (client) => {
+      await saved(client);
+      const [home] = landed(await loadFamily(client, [{ path: DOOR }]), "already_existed");
+      assert.ok(home);
+      const sized = typeNamed(home.actual, "750 x 2100 мм");
+      assertNear(sized.widthMm, 750, "the sized row, width", SIZE_NEAR_MM);
+      assertNear(sized.heightMm, 2100, "the sized row, height", SIZE_NEAR_MM);
+      const familiesBefore = (await listTypes(client, "doors")).filter((row) => row.family.toLowerCase() === "дверь-одинарная-панель");
+      assert.deepEqual([...new Set(familiesBefore.map((row) => row.family))], ["Дверь-Одинарная-Панель"]);
+
+      // The sized row of the door, then the same file spelled other ways. Windows takes them all for one file, and so does the tool:
+      // the row is found, nothing is loaded again, and the size written on it is still there.
+      const longLibrary = LIBRARY;
+      const shortFile = shortForm(path.win32.join(LIBRARY, DOOR));
+      const shortLibrary = shortForm(longLibrary);
+      assert.ok(shortFile.startsWith(shortLibrary + "\\"), `${shortFile} should lie below ${shortLibrary}`);
+      const shortRelative = shortFile.slice(shortLibrary.length + 1);
+      assert.match(shortRelative, /~/, "this volume makes 8.3 names, and the file has one");
+      assert.notEqual(shortRelative.toLowerCase(), DOOR.toLowerCase());
+      console.log(`# 8.3 spelling of the door: ${shortRelative}`);
+
+      const spellings: Array<[string, string]> = [
+        ["lower case", DOOR.toLowerCase()],
+        ["upper case", DOOR.toUpperCase()],
+        ["mixed case", DOOR.replace("Двери", "дВЕРИ").replace(".rfa", ".RFA")],
+        ["8.3 short names", shortRelative],
+        ["8.3 short names in lower case", shortRelative.toLowerCase()],
+        ["slashes and lower case", DOOR.toLowerCase().replaceAll("\\", "/")],
+      ];
+      for (const [what, spelled] of spellings) {
+        const [row] = landed(await loadFamily(client, [{ path: spelled, typeName: "750 x 2100 мм", widthMm: 750, heightMm: 2100 }]), "already_existed");
+        assert.ok(row, what);
+        assert.equal(row.elementId, sized.id, `${what}: the same type`);
+        assert.equal(row.actual.familyId, home.actual.familyId, `${what}: the same family`);
+        assert.deepEqual(row.warnings, [], `${what}: the sizes asked for are the ones it has`);
+        assertNear(typeNamed(row.actual, "750 x 2100 мм").widthMm, 750, `${what}: the width stays`, SIZE_NEAR_MM);
+        assertNear(typeNamed(row.actual, "750 x 2100 мм").heightMm, 2100, `${what}: the height stays`, SIZE_NEAR_MM);
+
+        const [whole] = landed(await loadFamily(client, [{ path: spelled }]), "already_existed");
+        assert.equal(whole!.elementId, home.actual.familyId, `${what}: the whole family`);
+      }
+      assert.equal(await isModified(client), false, "nothing was loaded again, so the project is as saved");
+
+      // Two spellings of one file in a list are one file, and a repeat.
+      const repeated = await refusal(client, "load_family", { items: [{ path: DOOR, typeName: "900 x 2000 мм" }, { path: shortRelative, typeName: "900 x 2000 мм" }] });
+      assert.match(repeated.message, /both load type '900 x 2000 мм'/);
+
+      // A row that is not there yet, asked for by the lower-case spelling, lands in the family that is there, and does not make a second family.
+      const [fresh] = landed(await loadFamily(client, [{ path: DOOR.toLowerCase(), typeName: "900 x 2000 мм" }]), "created");
+      assert.equal(fresh!.actual.familyId, home.actual.familyId, "the new row is in the family that was there");
+      const doors = (await listTypes(client, "doors")).filter((row) => row.family.toLowerCase() === "дверь-одинарная-панель");
+      assert.deepEqual([...new Set(doors.map((row) => row.family))], ["Дверь-Одинарная-Панель"], "no second family, in another case");
+      assert.equal(doors.length, familiesBefore.length + 1);
+      const [after] = landed(await loadFamily(client, [{ path: DOOR, typeName: "750 x 2100 мм" }]), "already_existed");
+      assertNear(typeNamed(after!.actual, "750 x 2100 мм").heightMm, 2100, "the sized row after a load through another spelling", SIZE_NEAR_MM);
     });
   });
 
@@ -530,6 +615,7 @@ describe("stage 3 live checks: families and instances", { timeout: 900_000 }, ()
       assert.ok(row, "the catalog has a row");
       const furnitureBefore = await listTypes(client, "furniture");
       const doorsBefore = await listTypes(client, "doors");
+      await saved(client);
 
       // The doors of the GOST folders compute their size, so it cannot be written. The load rolls back: the table before it, and the door itself.
       const batch = await loadFamily(client, [{ path: TABLE }, { path: GOST_DOOR, typeName: row, widthMm: 910, heightMm: 1870 }]);
@@ -547,6 +633,7 @@ describe("stage 3 live checks: families and instances", { timeout: 900_000 }, ()
       const heightOnly = await loadFamily(client, [{ path: GOST_DOOR, typeName: row, heightMm: 1870 }]);
       assert.equal(heightOnly.items[0]?.status, "failed");
       assert.deepEqual(await listTypes(client, "doors"), doorsBefore);
+      assert.equal(await isModified(client), false, "a load that failed and rolled back leaves the project as it was saved");
 
       const [plain] = landed(await loadFamily(client, [{ path: GOST_DOOR, typeName: row }]), "created");
       assert.ok(plain);
@@ -558,6 +645,29 @@ describe("stage 3 live checks: families and instances", { timeout: 900_000 }, ()
       // A size on a type that was loaded and is read-only is reported and not touched.
       const [again] = landed(await loadFamily(client, [{ path: GOST_DOOR, typeName: row, widthMm: 910 }]), "already_existed");
       assert.match(again!.warnings.join("\n"), /970 mm, not the 910 mm asked for/);
+
+      // A new row with a size that cannot be written, on a family that is in the project now: the item fails, the row is not loaded, and the family is as it was.
+      const second = rows[1];
+      assert.ok(second && second !== row, "the catalog has a second row");
+      const doorsWithOneRow = await listTypes(client, "doors");
+      await saved(client);
+      const bad = await loadFamily(client, [{ path: GOST_DOOR, typeName: second, widthMm: 910 }]);
+      assert.equal(bad.committed, false);
+      assert.equal(bad.items[0]?.status, "failed");
+      assert.match(bad.items[0]?.error ?? "", /read-only/);
+      assert.deepEqual(await listTypes(client, "doors"), doorsWithOneRow, "the second row is not in the family");
+      assert.equal(await isModified(client), false, "the failed load changed nothing");
+      const [kept] = landed(await loadFamily(client, [{ path: GOST_DOOR }]), "already_existed");
+      assert.deepEqual(kept!.actual.typeIds.map((type) => type.name), [row], "the family holds the one row it held");
+      assertNear(typeNamed(kept!.actual, row).widthMm, 970, "the row that was there is as it was", SIZE_NEAR_MM);
+
+      // The same row, asked for with no size, lands in the family that is there, and its warning does not advise a size that cannot be set.
+      const [next] = landed(await loadFamily(client, [{ path: GOST_DOOR, typeName: second }]), "created");
+      assert.equal(next!.actual.familyId, kept!.actual.familyId);
+      assert.equal(next!.warnings.length, 1);
+      assert.match(next!.warnings[0] ?? "", /970 x 2070 mm/);
+      assert.match(next!.warnings[0] ?? "", /computes this size itself, so it cannot be set/);
+      assert.doesNotMatch(next!.warnings[0] ?? "", /Give widthMm/);
     });
   });
 
@@ -615,6 +725,43 @@ describe("stage 3 live checks: families and instances", { timeout: 900_000 }, ()
       const rows = landed(batch, "created");
       assert.equal(rows[0]?.actual.familyId, rows[1]?.actual.familyId);
       assert.notEqual(rows[0]?.elementId, rows[1]?.elementId);
+    });
+  });
+
+  it("a type of another file with the name of a family in the project is not added, and the answer says why", async () => {
+    await withClient(async (client) => {
+      const rowsA = await catalogRows(STEEL_FRAME_A);
+      const rowsB = await catalogRows(STEEL_FRAME_B);
+      const [first, second] = rowsA;
+      const onlyInB = rowsB.find((row) => !rowsA.includes(row));
+      const inBoth = rowsB.find((row) => rowsA.includes(row) && row !== first && row !== second);
+      assert.ok(first && second && onlyInB && inBoth, "the two catalogs share rows and each has its own");
+
+      // Row of file A: the family is in the project. Rows of file B, one of them in both catalogs, are not added to it.
+      const [a] = landed(await loadFamily(client, [{ path: STEEL_FRAME_A, typeName: first }]), "created");
+      assert.ok(a);
+      await saved(client);
+      for (const [what, typeName] of [["a row only file B has", onlyInB], ["a row both files have", inBoth]] as const) {
+        const batch = await loadFamily(client, [{ path: STEEL_FRAME_B, typeName }]);
+        console.log(`# ${what}: ${batch.items[0]?.status}, ${batch.items[0]?.error?.slice(0, 260)}`);
+        assert.equal(batch.committed, false, what);
+        assert.equal(batch.items[0]?.status, "failed", what);
+        assert.match(batch.items[0]?.error ?? "", /another library file of the same name/, what);
+        assert.doesNotMatch(batch.items[0]?.error ?? "", /neither a type stored in the family/, `${what}: that would be false, the row is in the catalog`);
+      }
+      assert.equal(await isModified(client), false, "nothing changed");
+
+      // The family is as it was, and the whole family of file B is the family that is there, reported as such.
+      const [whole] = landed(await loadFamily(client, [{ path: STEEL_FRAME_B }]), "already_existed");
+      assert.equal(whole!.actual.familyId, a.actual.familyId);
+      assert.deepEqual(whole!.actual.typeIds.map((type) => type.name), [first], "the types of the family that is there, which came from file A");
+      assert.equal(await isModified(client), false);
+
+      // A row of file A, the file the family came from, does land: it is the file that decides, not the family.
+      const [more] = landed(await loadFamily(client, [{ path: STEEL_FRAME_A, typeName: second }]), "created");
+      assert.equal(more!.actual.familyId, a.actual.familyId);
+      const [both] = landed(await loadFamily(client, [{ path: STEEL_FRAME_A }]), "already_existed");
+      assert.deepEqual(both!.actual.typeIds.map((type) => type.name).sort(), [first, second].sort());
     });
   });
 
@@ -847,8 +994,27 @@ describe("stage 3 live checks: families and instances", { timeout: 900_000 }, ()
       assert.match(refusedColumn.message, /placement type TwoLevelsBased/);
       assert.match(refusedColumn.message, /OneLevelBased and OneLevelBasedHosted/);
 
+      // A family hosted by a ceiling is hosted, and the wall that is given cannot host it. Its family says so in its Host parameter, so it is refused by name before anything changes.
+      const [light] = landed(await loadFamily(client, [{ path: CEILING_LIGHT }]), "created");
+      assert.ok(light);
+      await saved(client);
+      const lightType = light.actual.typeIds[0];
+      assert.ok(lightType);
+      const lights: Array<[string, object]> = [
+        ["a ceiling light with no wall", { typeId: lightType.id, pointMm: point, levelId: w.ground.id }],
+        ["a ceiling light on the axis of a wall", { typeId: lightType.id, pointMm: { x: 3000, y: 0 }, levelId: w.ground.id, hostWallId: w.wallA, elevationMm: 2400 }],
+        ["a ceiling light beside a wall", { typeId: lightType.id, pointMm: { x: 3000, y: 200 }, levelId: w.ground.id, hostWallId: w.wallA, elevationMm: 2400 }],
+      ];
+      for (const [what, bad] of lights) {
+        const refused = await refusal(client, "place_instances", { items: [{ typeId: bed.id, pointMm: point, levelId: w.ground.id }, bad] });
+        console.log(`# ${what}: ${refused.message.slice(0, 240)}`);
+        assert.match(refused.message, /hangs on a ceiling, as its family says, and not on a wall/, what);
+        assert.match(refused.message, /place_instances item 1/, `${what}: the refusal should name the item`);
+      }
+      assert.equal(await isModified(client), false, "nothing was placed, not even the bed before the light");
+
       const after = await modelInfo(client);
-      for (const category of ["OST_Furniture", "OST_PlumbingFixtures", "OST_Columns", "OST_StructuralColumns"]) {
+      for (const category of ["OST_Furniture", "OST_PlumbingFixtures", "OST_Columns", "OST_StructuralColumns", "OST_LightingFixtures"]) {
         assert.equal(countOf(after, category), countOf(before, category), category);
       }
       assert.equal(await isModified(client), false, "a refused call changes nothing");
