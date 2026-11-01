@@ -256,29 +256,6 @@ describe("stage 3 live checks: reading materials, warnings and elements by categ
     });
   });
 
-  it("list_types with stairs lists only the types create_stairs takes", async () => {
-    await withClient(async (client) => {
-      const { ground, upper } = await context(client);
-      const rows = (await client.call("list_types", { category: "stairs" })) as TypeRow[];
-      console.log(`# stairs types: ${JSON.stringify(rows)}`);
-      assert.ok(rows.length > 0, "the template holds stairs types");
-
-      // The component Stair family shares the category with the stairs types ("Stair: Частные" and the like), and create_stairs
-      // refuses it, so it is not offered.
-      assert.ok(rows.every((row) => row.family !== "Stair"), JSON.stringify(rows));
-
-      // A zero width is refused after the type is read, so a type create_stairs does not take is refused first, for the type,
-      // and one it takes is refused for the width. Nothing is built either way.
-      for (const row of rows) {
-        const error = await refusal(client, "create_stairs", {
-          items: [{ baseLevelId: ground.id, topLevelId: upper.id, typeId: row.id, widthMm: 0, desiredRisers: 16, runsMm: [{ startMm: { x: 0, y: 0 }, endMm: { x: 0, y: 3750 } }] }],
-        });
-        assert.equal(error.code, INVALID_PARAMS);
-        assert.match(error.message, /widthMm must be above 0/, `type ${row.id} ${row.family}: ${row.name} is not taken by create_stairs: ${error.message}`);
-      }
-    });
-  });
-
   it("both ids and category are refused", async () => {
     await withClient(async (client) => {
       const info = await modelInfo(client);

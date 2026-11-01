@@ -325,6 +325,50 @@ describe("stage 3 live checks: stairs", { timeout: 180_000 }, () => {
     });
   });
 
+  it("every type list_types offers for stairs builds real stairs", async () => {
+    await withClient(async (client) => {
+      const w = ready();
+      const rows = await listTypes(client, "stairs");
+      console.log(`# stairs types: ${JSON.stringify(rows)}`);
+      assert.ok(rows.length > 0, "the template holds stairs types");
+
+      // The types of the Stair family share the category with the stairs types, and create_stairs refuses them.
+      assert.ok(rows.every((row) => row.family !== "Stair"), JSON.stringify(rows));
+
+      for (const row of rows) {
+        const x = scene();
+        const item = (length: number) => ({
+          baseLevelId: w.ground.id,
+          topLevelId: w.upper.id,
+          typeId: row.id,
+          runsMm: [{ startMm: { x, y: 0 }, endMm: { x, y: length } }],
+          widthMm: WIDTH_MM,
+          desiredRisers: RISERS,
+        });
+
+        // The run for RISERS risers depends on the tread depth of the type, which a refusal of a run too short for it states.
+        const probe = await refusedAndUnchanged(client, { items: [item(1000)] }, /needs a run of [\d.]+ mm/, `${row.family}: ${row.name}`);
+        const needed = /needs a run of ([\d.]+) mm/.exec(probe.message)?.[1];
+        assert.ok(needed, probe.message);
+
+        const batch = await createStairs(client, item(Number(needed)));
+        console.log(`# ${row.family}: ${row.name} (${row.id}), run ${needed} mm: ${JSON.stringify(batch).slice(0, 1500)}`);
+        assert.equal(batch.committed, true, `${row.family}: ${row.name}: ${JSON.stringify(batch).slice(0, 1500)}`);
+        assert.deepEqual(batch.errors, []);
+        assert.deepEqual(batch.dialogs, []);
+
+        const [built] = batch.items;
+        assert.ok(built?.elementId && built.actual, JSON.stringify(batch));
+        assert.equal(built.status, "created", JSON.stringify(built));
+        assert.equal(built.actual.risers, RISERS);
+        assertNear(built.actual.topElevationMm, STOREY_MM, `${row.name}: top`);
+
+        // The type read back from the model is the row asked for.
+        assert.equal((await elementsOf(client, [built.elementId])).elements[0]?.typeName, row.name, `${row.family}: ${row.name}`);
+      }
+    });
+  });
+
   it("straight stairs connect two levels", async () => {
     await withClient(async (client) => {
       const w = ready();
