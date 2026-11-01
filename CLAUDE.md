@@ -40,7 +40,7 @@ Full history: the `Журнал решений` note in the vault. Open question
 4. **The core is protected.** Do not change threading, transaction or protocol code without an explicit request. The protected files:
    - `src/plugin/RevitMCP.Bridge`: `Framing.cs`, `RequestQueue.cs`, `RequestStore.cs`, `BridgeServer.cs`
    - `src/plugin/RevitMCP.Commands/Dispatch`: `CommandHandler.cs`
-   - `src/plugin/RevitMCP.Commands/Revit`: `Operation.cs`, `DialogGuard.cs`, `FailureCollector.cs`, `UndoHistory.cs`, `UndoTracker.cs`
+   - `src/plugin/RevitMCP.Commands/Revit`: `Operation.cs`, `EditScopeOperation.cs`, `DialogGuard.cs`, `FailureCollector.cs`, `UndoHistory.cs`, `UndoTracker.cs`
 
    Any change that alters `RevitMCP.Plugin.dll`, including the `PluginHost.Start` or `Stop` signatures, makes Revit ask the user for Always Load again.
 5. **Verify after changes.** Build, run the tests, and exercise plugin changes in live Revit. If you cannot verify something, say so. Claude may restart Revit for this, but only when every open document is saved in `%USERPROFILE%\Documents\RevitMCP`, and never by killing the process.
