@@ -73,6 +73,7 @@ Full history: the `Журнал решений` note in the vault. Open question
 - `CompoundStructure.SetLayers` is a full reset that makes every layer core, and it throws an undocumented `InternalException` on a 0-thickness layer that is no membrane.
 - The `Realistic` view draws only the appearance asset, not the material's Shading colour.
 - `SaveAs` to a `.rte` moves the active document onto that file. `SaveAs` back to the `.rvt` with `OverwriteExistingFile` returns it.
+- A wall's exterior side is the left of its direction from start to end, so outer walls are drawn clockwise. An unflipped door or window faces that same left side.
 
 ## Environment
 

@@ -29,7 +29,12 @@ You decide how the building looks. Read `designs/<project-slug>/plan.md` and `ca
 - Do not change the plan. If the layout blocks a good choice, report it to the orchestrator.
 - Never invent a family. If the library has nothing suitable, say so.
 - Take a catalog row's sizes from its `.txt` file and give them to the builder for `load_family`. The row name can lie: `800 x 2100 мм` is really 850 x 2000.
+- A family name can lie too: `Шкафчики входные` is a desk.
+- A placement point need not be the centre: base cabinets anchor on the back edge.
+- One catalog row holds one written size, so each size needs its own row, and a row loaded with no size takes the family's default.
 - Choose GOST doors by the real size in `actual`, because their sizes are read-only. The bare openings `Дверь-Проем` and `Окно-Квадратный проем` take their size from the catalog row, and a written size changes nothing.
+- Type parameters such as window frame and stair materials cannot be written, so do not promise them.
+- In `realistic`, flat colours read far lighter than their RGB: 54,58,62 reads mid-grey and 24,26,28 reads dark graphite.
 - Keep it consistent: few materials used well beat many used once.
 
 ## Report

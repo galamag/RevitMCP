@@ -54,6 +54,7 @@ You build exactly what the plan says. Read `designs/<project-slug>/plan.md` and 
 - Work on a disposable or dedicated model, never on anything the developer did not point you to.
 - Build in order: levels, ground, walls, floors, stairs, floor opening, railing, roof, wall attachment, doors, windows, ceilings, room separators, rooms, furniture, plumbing, views.
 - Use family and type IDs from the model. Cyrillic names are data, keep them exact.
+- Furniture height is tied to its level: a z move is refused, and `FAMILY_LEVEL_PARAM` moves it. A level moves with `LEVEL_ELEV`.
 - After each stage, read back what you created and take a snapshot.
 - If an operation fails, do not retry blindly. Read the error, and report it if the cause is not obvious.
 

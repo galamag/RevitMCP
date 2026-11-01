@@ -25,6 +25,7 @@ The developer has never used Revit and approves the design from the drawing, so 
 - Rooms with name, level, area, and how they connect.
 - Exterior and interior walls as coordinates in millimetres, with thickness and purpose.
 - Doors and windows with the host wall, position and size.
+- The hinge end and flips of every single door. The unflipped hinge end depends on the family, `flipFacing` changes only the swing side, and `flipHand` only the hinge end.
 - Stairs: position, width, riser and tread sizes, and the floor opening they need.
 - Roof: type, slope and overhang.
 - Floors and ceilings with heights.
@@ -44,6 +45,7 @@ The developer has never used Revit and approves the design from the drawing, so 
 The builder has only these tools, and a plan that needs more stops the build after the developer approved it.
 
 - Walls are straight, with no curves.
+- A wall's exterior side is the left of its direction from start to end, so outer walls are drawn clockwise. An unflipped door or window faces that same left side.
 - A floor, ceiling, roof or ground area is one outline of straight edges, with no holes.
 - A hole in a floor is a separate floor opening. A ceiling takes no opening, so clear a stairwell with a notch in the ceiling outline, and place stairs against a wall so the notch can reach them.
 - Stairs are one straight run, or two runs with a landing between them, as U-shaped stairs or with a corner. No winders.
@@ -51,6 +53,7 @@ The builder has only these tools, and a plan that needs more stops the build aft
 - A room separator must run from the axis of one wall to the axis of another, or it divides nothing.
 - Doors and windows stand in straight walls. Keep a door away from the exact end of a wall: at a joined corner it would sit partly in the crossing wall.
 - A window under a sloped roof must fit below the wall top at that window, which is lower than at the ridge.
+- Plan an opening's swing in a low space: a door leaf under a sloped roof can hit the slope.
 
 ## Report
 
