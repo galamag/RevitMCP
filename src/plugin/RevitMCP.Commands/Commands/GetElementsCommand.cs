@@ -13,7 +13,8 @@ namespace RevitMCP.Commands;
 /// answer. A category lists the elements of the model, not their types, by ID, and stops at
 /// <see cref="ElementIds.MaxListed"/>: <c>truncated</c> says that more matched. The keys <c>elements</c>,
 /// <c>notFound</c> and <c>truncated</c> are always present. <c>boundingBoxMm</c> is the model box, aligned to the model
-/// axes, and null when Revit knows none. A wall also has <c>topMm</c>, and a room <c>name</c>, <c>number</c> and <c>areaM2</c>.
+/// axes, and null when Revit knows none. A wall also has <c>topMm</c>, a room <c>name</c>, <c>number</c> and <c>areaM2</c>, a floor, a ceiling and a roof
+/// <c>areaM2</c>, and a door or window in the model what <see cref="OpeningReader"/> reads of it. A type of a door or window, furniture and plumbing get none of that.
 /// </summary>
 public sealed class GetElementsCommand : ICommand
 {
@@ -126,6 +127,22 @@ public sealed class GetElementsCommand : ICommand
             description["name"] = CreateRoomsCommand.NameOf(room);
             description["number"] = CreateRoomsCommand.NumberOf(room);
             description["areaM2"] = Units.InternalToSquareMetres(room.Area);
+        }
+
+        // RevitAPI.dll: Toposolid derives from CeilingAndFloor next to Floor and Ceiling, and from neither of them, so the ground is not caught here.
+        if (element is Floor or Ceiling or RoofBase)
+        {
+            description["areaM2"] = element.get_Parameter(BuiltInParameter.HOST_AREA_COMPUTED) is { StorageType: StorageType.Double } area
+                ? Units.InternalToSquareMetres(area.AsDouble())
+                : (double?)null;
+        }
+
+        if (element is FamilyInstance instance && OpeningReader.IsOpening(instance))
+        {
+            foreach (var (key, value) in OpeningReader.Describe(instance))
+            {
+                description[key] = value;
+            }
         }
 
         return description;

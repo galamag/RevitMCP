@@ -81,7 +81,9 @@ interface ElementRow {
   topMm?: number | null;
   name?: string;
   number?: string;
-  areaM2?: number;
+  areaM2?: number | null;
+  fromRoomId?: string | null;
+  toRoomId?: string | null;
 }
 
 interface ElementsAnswer {
@@ -720,7 +722,11 @@ describe("stage 3 acceptance: a small two-storey house", { timeout: 180_000 }, (
         }
       };
 
+      // The doors go in before the rooms, as the build order has them, so neither has a room yet: get_elements reads them once the rooms exist.
       await placeOpenings("entrance door", "door", [{ what: "the entrance door in the south wall of the living room", typeId: entranceType, wallId: south, offsetAlongWallMm: 3600 }]);
+      await placeOpenings("inner door", "door", [{ what: "the door between the bedroom and the bathroom", typeId: innerType, wallId: partitions[0]!.elementId, offsetAlongWallMm: 2000 }]);
+      const entranceDoor = openings[0]!.item;
+      const innerDoor = openings[1]!.item;
       await placeOpenings("ground windows", "window", [
         { what: "living room, south", typeId: bigWindow, wallId: south, offsetAlongWallMm: 1800, sillHeightMm: 900 },
         { what: "kitchen, south", typeId: bigWindow, wallId: south, offsetAlongWallMm: 6500, sillHeightMm: 900 },
@@ -802,13 +808,16 @@ describe("stage 3 acceptance: a small two-storey house", { timeout: 180_000 }, (
       const [livingRoom, kitchen, bedroom, bathroom] = rooms as [Landed<RoomActual>, Landed<RoomActual>, Landed<RoomActual>, Landed<RoomActual>];
       assertNear(livingRoom.actual.areaM2 + kitchen.actual.areaM2, innerM2, "the two rooms of the ground floor fill the floor", NEAR_M2);
 
-      // The inner door goes in after the rooms: fromRoomId and toRoomId are read from the model when place_hosted answers and no other tool reads them,
-      // so a door placed before its rooms exist would say null on both sides for good.
-      await placeOpenings("inner door", "door", [{ what: "the door between the bedroom and the bathroom", typeId: innerType, wallId: partitions[0]!.elementId, offsetAlongWallMm: 2000 }]);
-      const innerDoor = openings.at(-1)!.item.actual;
-      assert.ok(innerDoor.fromRoomId && innerDoor.toRoomId, `an inner door leads from one room to another: ${JSON.stringify(innerDoor)}`);
-      assert.deepEqual([innerDoor.fromRoomId, innerDoor.toRoomId].sort(), [bedroom.elementId, bathroom.elementId].sort(), "the door joins the bedroom and the bathroom");
-      assert.deepEqual([openings[0]!.item.actual.fromRoomId, openings[0]!.item.actual.toRoomId], [null, null], "the entrance door was placed before any room existed");
+      // The doors were placed before any room existed, and get_elements reads their rooms at the moment of the call.
+      assert.deepEqual([innerDoor.actual.fromRoomId, innerDoor.actual.toRoomId], [null, null], "the inner door was placed before any room existed");
+      assert.deepEqual([entranceDoor.actual.fromRoomId, entranceDoor.actual.toRoomId], [null, null], "the entrance door was placed before any room existed");
+      const doorRows = (await elementsOf(client, { ids: [innerDoor.elementId, entranceDoor.elementId] })).elements;
+      const [innerRow, entranceRow] = doorRows;
+      assert.ok(innerRow && entranceRow, JSON.stringify(doorRows));
+      console.log(`# doors after the rooms: ${JSON.stringify(doorRows)}`);
+      assert.ok(innerRow.fromRoomId && innerRow.toRoomId, `an inner door leads from one room to another: ${JSON.stringify(innerRow)}`);
+      assert.deepEqual([innerRow.fromRoomId, innerRow.toRoomId].sort(), [bedroom.elementId, bathroom.elementId].sort(), "the door joins the bedroom and the bathroom");
+      assert.deepEqual([entranceRow.fromRoomId, entranceRow.toRoomId].filter((room) => room !== null), [livingRoom.elementId], "the entrance door leads from outdoors to the living room");
 
       // FURNITURE: a sofa and a table below, a bed above.
       const [sofaFamily, tableFamily, bedFamily] = await loadFamilies(client, [{ path: SOFA }, { path: DINING_TABLE }, { path: BED }]) as [Landed<FamilyActual>, Landed<FamilyActual>, Landed<FamilyActual>];

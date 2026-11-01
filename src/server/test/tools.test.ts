@@ -1092,6 +1092,10 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /load_family refuses widthMm and heightMm for it/);
     assert.match(description, /cutsWall/);
     assert.match(description, /fromRoomId and toRoomId/);
+    assert.match(description, /actual is \{ hostId, offsetAlongWallMm, sillHeightMm, widthMm, heightMm, facingFlipped, handFlipped, fromRoomId, toRoomId, cutsWall \}/);
+    assert.match(description, /widthMm and heightMm are the size of the opening/);
+    assert.match(description, /at the moment of this call/);
+    assert.match(description, /read them with get_elements once the rooms exist/);
     assert.match(description, /first instance of a type does not otherwise cut its wall/);
     assert.match(description, /list_types with doors or windows/);
     assert.match(description, /place_instances/);
@@ -1462,6 +1466,39 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /at most 1000, and truncated is true when more matched/);
     assert.match(description, /only with category/);
     assert.match(description, /notFound is always empty with category/);
+  });
+
+  it("tells the model the truth about what get_elements reads of a door or window", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "get_elements")?.description ?? "";
+
+    assert.match(description, /elements is \[\{ id, category, typeName, levelId, boundingBoxMm, topMm\?, name\?, number\?, areaM2\?, hostId\?, offsetAlongWallMm\?, sillHeightMm\?, widthMm\?, heightMm\?, facingFlipped\?, handFlipped\?, fromRoomId\?, toRoomId\?, cutsWall\? \}\]/);
+    assert.match(description, /from the start of the axis of the wall as it stands now to the centre of the opening/);
+    assert.match(description, /so it changes when a wall joined to that end moves it/);
+    assert.match(description, /null when the host is no straight wall, and for a door or window that is a panel of a curtain wall/);
+    assert.match(description, /The box of a door or window includes the leaf or the sash/);
+    assert.match(description, /so read its place from offsetAlongWallMm and not from boundingBoxMm/);
+    assert.match(description, /sillHeightMm is the sill above the level in millimetres, null when the family has none/);
+    assert.match(description, /the rough size for a bare opening, null when the type reads none/);
+    assert.match(description, /read at the moment of this call, so a door placed before its rooms reads them here once they exist/);
+    assert.match(description, /null where that side has no room, as outdoors/);
+    assert.match(description, /false when the host is no wall/);
+    assert.match(description, /A door or window type read by id, furniture and plumbing have none of these keys/);
+  });
+
+  it("tells the model the truth about what areaM2 of get_elements measures", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "get_elements")?.description ?? "";
+
+    assert.match(description, /A floor, a ceiling and a roof also have areaM2, in square metres, null when Revit gives them none/);
+    assert.match(description, /A floor's areaM2 is net of its openings and gross of the walls/);
+    assert.match(description, /a room's is net of them/);
+    assert.match(description, /A roof's is measured along the slope, overhang included: a gable of footprint a x b at slope s reads ab \/ cos\(s\)/);
+    assert.match(description, /toposolid has no areaM2/);
   });
 
   it("forwards list_materials and get_warnings with no arguments, and returns Cyrillic intact", async (t) => {

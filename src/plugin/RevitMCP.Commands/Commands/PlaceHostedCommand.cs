@@ -62,7 +62,7 @@ public sealed class PlaceHostedCommand : ICommand
             Method,
             entries,
             input => Place(document, input, notes),
-            element => Describe((FamilyInstance)element),
+            element => OpeningReader.Describe((FamilyInstance)element),
             element => notes.TryGetValue(element.Id, out var note) ? [note] : []);
     }
 
@@ -151,7 +151,7 @@ public sealed class PlaceHostedCommand : ICommand
             throw new InvalidOperationException($"Revit put the instance {Units.FormatNumber(alongMm)} mm along the wall and not the {Units.FormatNumber(input.OffsetMm)} mm asked for in offsetAlongWallMm.");
         }
 
-        var sillMm = SillMm(instance);
+        var sillMm = OpeningReader.SillMm(instance);
 
         if (sillMm is null || Math.Abs(sillMm.Value - input.SillMm) > SamePositionMm)
         {
@@ -165,7 +165,7 @@ public sealed class PlaceHostedCommand : ICommand
                 $"Revit holds the instance with facing flipped {instance.FacingFlipped} and hand flipped {instance.HandFlipped}, and flipFacing {input.FlipFacing} and flipHand {input.FlipHand} were asked for.");
         }
 
-        if (!CutsWall(host, instance.Id))
+        if (!OpeningReader.CutsWall(host, instance.Id))
         {
             // Live Revit: an instance made right after Activate, with no regeneration between, is committed with no warning and does not cut.
             throw new InvalidOperationException(
@@ -417,24 +417,6 @@ public sealed class PlaceHostedCommand : ICommand
 
         return new Extent(alongMm - (widthMm.Value / 2), alongMm + (widthMm.Value / 2), bottomMm, bottomMm + heightMm.Value);
     }
-
-    private static object Describe(FamilyInstance instance) => new
-    {
-        hostId = instance.Host?.Id.ToString(),
-        offsetAlongWallMm = Units.InternalToMm(instance.HostParameter),
-        sillHeightMm = SillMm(instance),
-        facingFlipped = instance.FacingFlipped,
-        handFlipped = instance.HandFlipped,
-        fromRoomId = instance.FromRoom?.Id.ToString(),
-        toRoomId = instance.ToRoom?.Id.ToString(),
-        cutsWall = instance.Host is Wall wall && CutsWall(wall, instance.Id),
-    };
-
-    private static bool CutsWall(Wall wall, ElementId instanceId) => wall.FindInserts(false, false, false, false).Contains(instanceId);
-
-    /// <summary>The sill height of an instance in millimetres, above its level, or <c>null</c> when it has none.</summary>
-    private static double? SillMm(FamilyInstance instance) =>
-        instance.get_Parameter(BuiltInParameter.INSTANCE_SILL_HEIGHT_PARAM) is { StorageType: StorageType.Double } parameter ? Units.InternalToMm(parameter.AsDouble()) : null;
 
     /// <summary>A height of the wall as the caller measures it, above the base level, or that there is no wall there.</summary>
     private static string TopText(double? topMm, double levelMm) => topMm is { } top ? $"{Units.FormatNumber(top - levelMm)} mm" : "no wall";
