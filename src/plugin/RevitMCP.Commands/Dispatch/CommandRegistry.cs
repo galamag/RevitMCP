@@ -53,6 +53,7 @@ public sealed class CommandRegistry
         new PlaceInstancesCommand(),
         new PlaceHostedCommand(),
         new CreateStairsCommand(),
+        new CreateRailingsCommand(),
         new AttachWallsCommand(),
         new DeleteElementsCommand(),
         new UndoLastOperationCommand(undoTracker),

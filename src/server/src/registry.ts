@@ -52,6 +52,10 @@ const MAX_STAIRS_RISERS = 500;
 const MAX_STAIRS_RUNS = 2;
 const MAX_STAIRS_WIDTH_MM = 9_144_000;
 
+/** The places railings take on a stairs, and the fewest points of a railing path, which the plugin checks too. */
+const RAILING_POSITIONS = ["treads", "stringer"] as const;
+const MIN_RAILING_PATH_POINTS = 2;
+
 /** The limits of a colour channel and of transparency, which the plugin checks too. */
 const MAX_COLOR_CHANNEL = 255;
 const MAX_TRANSPARENCY = 100;
@@ -782,6 +786,45 @@ export const tools: readonly ToolDefinition[] = [
         )
         .length(1)
         .describe("Exactly one staircase."),
+    },
+  },
+  {
+    name: "create_railings",
+    description:
+      "Makes railings in the active project, in two kinds of item. A stairs item is { stairsId, typeId, position }: railings on a stairs. A path item is { pathMm, typeId, levelId }: one railing along a path, such as round the opening of a stair in an upper floor. " +
+      "Take typeId from list_types with railings, stairsId from create_stairs (its elementId) or from get_elements with stairs, and levelId from get_model_info. An item that has both stairsId and pathMm, or neither, is refused. " +
+      "STAIRS: Revit adds railings to every new stairs by itself, so a stairs from create_stairs has them already, and the usual answer for a stairs item is already_existed. Nothing is changed, no Undo step is added when every item is like that, " +
+      "and actual.railings lists the railings that are there with their real type, whatever typeId asked for. elementId is the lowest of their ids. If a railing is of another type than typeId, the item carries a warning that says which, and that the way to change the type of railings that exist is update_elements with their ids and the typeId: " +
+      "Revit changes the type of a railing in place. position is not compared for railings that exist. " +
+      "Railings are made on a stairs only where it has none, as after delete_elements removed them: on the sides of the stairs, all of the type asked for. position says where they stand: 'treads' puts them on the treads, inside the width of the run, " +
+      "and 'stringer' puts them on the stringers, outside it. Each railing made is read back and must be hosted by that stairs and of that type, or the item fails and nothing stays. A stairs that Revit says cannot take new railings, " +
+      "which for stairs with none means stairs in edit mode, is refused before anything changes. The same stairs twice in one list is refused. " +
+      "PATH: pathMm lists the points of the path in millimetres in model coordinates, at least 2, and the edges join them in order, as straight lines. The path does not close by itself: repeat the first point as the last to close it, and leave out the side you want open, " +
+      "such as where people arrive at the top of a stair. The height of the points does not matter: the railing stands on the level of levelId, and its height above the level is that of the type. " +
+      "Revit judges the path before anything changes, and a path it does not take is refused naming the item: the edges must be continuous, and no three of them may meet at one point, which a point listed twice in the middle of the list makes. Neighbouring points closer than Revit can draw are refused as well. " +
+      "To fence an opening made with create_floor_openings, pass the corners of its boundaryMm as pathMm, and levelId of the level the floor belongs to. " +
+      "A railing along a path is read back after it is made: its type, and every edge of its path with the height of the level, are compared with the request, and one that does not match fails the item and nothing stays. " +
+      "actual is { hostId, railings, pathMm, elevationMm }, read from the model after the commit. hostId is the stairs for a stairs item and null for a path. railings lists [{ id, typeId, typeName }], sorted by id: all the railings of the stairs, or the one railing of the path. " +
+      "pathMm and elevationMm are for a path item and null for a stairs item: pathMm is the points of the path as the railing holds them, in millimetres, and elevationMm is the height of the path in model coordinates. " +
+      "For this tool the batch rules read so: the item is one stairs or one path, but it can make several railings, and elementId is only the first of them: the others are in actual.railings. " +
+      "already_existed means the stairs had railings, and nothing was made. " +
+      BATCH_RULES +
+      " Related tools: create_stairs, create_floor_openings, list_types, get_model_info, get_elements, delete_elements, undo_last_operation, get_view_snapshot, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.union([
+          z.strictObject({
+            stairsId: elementId("The id of the stairs, from create_stairs or from get_elements with stairs"),
+            typeId: elementId("The id of a railing type, from list_types with railings"),
+            position: z.enum(RAILING_POSITIONS).describe("Where the railings stand: 'treads' inside the width of the run, 'stringer' outside it. Used only for stairs that have no railings."),
+          }),
+          z.strictObject({
+            pathMm: z.array(planPoint("A point of the path")).min(MIN_RAILING_PATH_POINTS).describe(`The points of the path in order, at least ${MIN_RAILING_PATH_POINTS}. It does not close by itself: repeat the first point as the last to close it.`),
+            typeId: elementId("The id of a railing type, from list_types with railings"),
+            levelId: elementId("The id of the level the railing stands on, from get_model_info"),
+          }),
+        ]),
+      ),
     },
   },
   {

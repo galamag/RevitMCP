@@ -27,6 +27,7 @@
     "place_instances",
     "place_hosted",
     "create_stairs",
+    "create_railings",
     "attach_walls",
     "delete_elements",
     "undo_last_operation",

@@ -60,6 +60,8 @@ const instance = { typeId: "7", pointMm: { x: 1000, y: 2000 }, levelId: "2" };
 const hosted = { typeId: "7", wallId: "10", offsetAlongWallMm: 1500, sillHeightMm: 900 };
 const run = { startMm: { x: 0, y: 0 }, endMm: { x: 0, y: 3750 } };
 const stairs = { baseLevelId: "311", topLevelId: "694", typeId: "7", runsMm: [run], widthMm: 1000, desiredRisers: 16 };
+const railingOnStairs = { stairsId: "300", typeId: "25223", position: "treads" };
+const railingOnPath = { pathMm: [{ x: 0, y: 0 }, { x: 3000, y: 0 }, { x: 3000, y: 2000 }], typeId: "25223", levelId: "2" };
 const material = { name: "Краснодарский кирпич", colorRgb: { r: 170, g: 40, b: 35 } };
 const layer = { thicknessMm: 200, materialId: "7", function: "structure" };
 const typeItem = { category: "walls", baseTypeId: "408", name: "Стена 250 мм" };
@@ -84,6 +86,7 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "create_levels",
         "create_materials",
         "create_project",
+        "create_railings",
         "create_roof",
         "create_stairs",
         "create_type",
@@ -433,6 +436,32 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["create_stairs", { items: [{ ...stairs, desiredRisers: 501 }] }],
     ["create_stairs", { items: [{ ...stairs, desiredRisers: 15.5 }] }],
     ["create_stairs", { items: [{ ...stairs, justification: "Left" }] }],
+    ["create_railings", {}],
+    ["create_railings", { items: [] }],
+    ["create_railings", { items: batch(501, railingOnStairs) }],
+    ["create_railings", { items: [{}] }],
+    ["create_railings", { items: [{ typeId: "25223", position: "treads" }] }],
+    ["create_railings", { items: [{ ...railingOnStairs, stairsId: 300 }] }],
+    ["create_railings", { items: [{ ...railingOnStairs, stairsId: "" }] }],
+    ["create_railings", { items: [{ ...railingOnStairs, typeId: undefined }] }],
+    ["create_railings", { items: [{ ...railingOnStairs, typeId: 25223 }] }],
+    ["create_railings", { items: [{ ...railingOnStairs, position: undefined }] }],
+    ["create_railings", { items: [{ ...railingOnStairs, position: "Treads" }] }],
+    ["create_railings", { items: [{ ...railingOnStairs, position: "left" }] }],
+    ["create_railings", { items: [{ ...railingOnStairs, levelId: "2" }] }],
+    ["create_railings", { items: [{ ...railingOnStairs, pathMm: railingOnPath.pathMm }] }],
+    ["create_railings", { items: [{ ...railingOnPath, stairsId: "300" }] }],
+    ["create_railings", { items: [{ ...railingOnPath, pathMm: undefined }] }],
+    ["create_railings", { items: [{ ...railingOnPath, pathMm: [{ x: 0, y: 0 }] }] }],
+    ["create_railings", { items: [{ ...railingOnPath, pathMm: [{ x: 0, y: 0 }, { x: 1000 }] }] }],
+    ["create_railings", { items: [{ ...railingOnPath, pathMm: [{ x: 0, y: 0 }, { x: 1000, y: 0, z: 3000 }] }] }],
+    ["create_railings", { items: [{ ...railingOnPath, pathMm: [{ x: "0", y: 0 }, { x: 1000, y: 0 }] }] }],
+    ["create_railings", { items: [{ ...railingOnPath, typeId: undefined }] }],
+    ["create_railings", { items: [{ ...railingOnPath, typeId: 25223 }] }],
+    ["create_railings", { items: [{ ...railingOnPath, levelId: undefined }] }],
+    ["create_railings", { items: [{ ...railingOnPath, levelId: 2 }] }],
+    ["create_railings", { items: [{ ...railingOnPath, position: "treads" }] }],
+    ["create_railings", { items: [{ ...railingOnPath, closed: true }] }],
     ["attach_walls", {}],
     ["attach_walls", { items: [] }],
     ["attach_walls", { items: batch(501, attachment) }],
@@ -739,6 +768,53 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.deepEqual(bridge.frames[0]?.params, { items: [stairs] });
     assert.deepEqual(bridge.frames[1]?.params, { items: [twoRuns] });
     assert.deepEqual(bridge.frames[2]?.params, { items: [widest] });
+  });
+
+  it("passes railings on a stairs and along a path as they were given, in one list", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+    const stringers = { ...railingOnStairs, position: "stringer" };
+    const closed = { ...railingOnPath, pathMm: [{ x: 0.5, y: 0 }, { x: 3000, y: 0 }, { x: 3000, y: 2000.5 }, { x: 0.5, y: 0 }] };
+
+    const result = await client.callTool({ name: "create_railings", arguments: { items: [railingOnStairs, stringers, railingOnPath, closed] } });
+
+    assert.ok(!result.isError);
+    assert.equal(bridge.frames[0]?.method, "create_railings");
+    assert.deepEqual(bridge.frames[0]?.params, { items: [railingOnStairs, stringers, railingOnPath, closed] });
+  });
+
+  it("tells the model the truth about create_railings", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const tool = listed.find((entry) => entry.name === "create_railings");
+    const description = tool?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    assert.match(description, /500/);
+    for (const word of ["created", "failed", "rolled_back", "not attempted", "actual", "already_existed"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /Revit adds railings to every new stairs by itself/);
+    assert.match(description, /the usual answer for a stairs item is already_existed/);
+    assert.match(description, /real type, whatever typeId asked for/);
+    assert.match(description, /update_elements/);
+    assert.match(description, /after delete_elements removed them/);
+    assert.match(description, /'treads' puts them on the treads/);
+    assert.match(description, /'stringer' puts them on the stringers/);
+    assert.match(description, /does not close by itself: repeat the first point as the last/);
+    assert.match(description, /height of the points does not matter/);
+    assert.match(description, /no three of them may meet at one point/);
+    assert.match(description, /boundaryMm as pathMm/);
+    assert.match(description, /list_types with railings/);
+    assert.match(description, /elementId is only the first of them/);
+    assert.match(description, /create_stairs/);
+    assert.match(description, /delete_elements/);
+
+    const schema = JSON.stringify(tool?.inputSchema);
+    assert.match(schema, /stairsId/);
+    assert.match(schema, /pathMm/);
+    assert.match(schema, /stringer/);
   });
 
   it("tells the model the truth about create_stairs", async (t) => {

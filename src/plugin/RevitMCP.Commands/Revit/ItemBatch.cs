@@ -58,16 +58,31 @@ internal static class ItemBatch
         IReadOnlyList<BatchEntry<T>> entries,
         Func<T, Element> create,
         Func<Element, object> readBack,
+        Func<Element, IReadOnlyList<string>>? warningsOf = null) =>
+        RunMany(document, method, entries, input => [create(input)], readBack, warningsOf);
+
+    /// <summary>
+    /// <see cref="Run{T}"/> for an item that makes several elements, such as the railings of a stairs. The first element is the one
+    /// the item reports: its ID is the <see cref="ItemResult.ElementId"/> and <paramref name="readBack"/> gets it. Each of the others
+    /// must be in the model after the commit too, or the item fails there, as one that Revit removed.
+    /// </summary>
+    public static JsonElement RunMany<T>(
+        Document document,
+        string method,
+        IReadOnlyList<BatchEntry<T>> entries,
+        Func<T, IReadOnlyList<Element>> create,
+        Func<Element, object> readBack,
         Func<Element, IReadOnlyList<string>>? warningsOf = null)
     {
         var results = entries.Select(entry => entry.Settled).ToArray();
+        var alsoCreated = new Dictionary<int, IReadOnlyList<ElementId>>();
         var outcome = results.All(result => result is not null)
             ? new OperationOutcome(true, [], [], [])
-            : Operation.Run(document, method, scope => CreateAll(document, entries, results, create, method, scope));
+            : Operation.Run(document, method, scope => CreateAll(document, entries, results, create, alsoCreated, method, scope));
 
         if (outcome.Committed)
         {
-            ReadBackAll(document, results, readBack, warningsOf, method);
+            ReadBackAll(document, results, readBack, warningsOf, method, alsoCreated);
         }
 
         var batch = new BatchResult();
@@ -88,7 +103,8 @@ internal static class ItemBatch
         Document document,
         IReadOnlyList<BatchEntry<T>> entries,
         ItemResult?[] results,
-        Func<T, Element> create,
+        Func<T, IReadOnlyList<Element>> create,
+        Dictionary<int, IReadOnlyList<ElementId>> alsoCreated,
         string method,
         OperationScope scope)
     {
@@ -101,9 +117,20 @@ internal static class ItemBatch
 
             try
             {
-                var element = create(entry.Input);
+                var elements = create(entry.Input);
+
+                if (elements.Count == 0)
+                {
+                    throw new System.InvalidOperationException("Revit made no element for this item.");
+                }
+
                 document.Regenerate();
-                results[position] = new ItemResult(entry.Index, ItemStatus.Created, element.Id.ToString(), entry.Requested, null, [], null);
+                results[position] = new ItemResult(entry.Index, ItemStatus.Created, elements[0].Id.ToString(), entry.Requested, null, [], null);
+
+                if (elements.Count > 1)
+                {
+                    alsoCreated[position] = elements.Skip(1).Select(element => element.Id).ToList();
+                }
             }
             catch (RegenerationFailedException e)
             {
@@ -124,13 +151,17 @@ internal static class ItemBatch
         }
     }
 
-    /// <summary>The batch has landed by now, so a failure here must not read as a failed call.</summary>
+    /// <summary>
+    /// The batch has landed by now, so a failure here must not read as a failed call. <paramref name="alsoCreated"/>, when given, holds
+    /// by position the further elements of an item that made several, and one of them that is gone fails the item.
+    /// </summary>
     public static void ReadBackAll(
         Document document,
         ItemResult?[] results,
         Func<Element, object> readBack,
         Func<Element, IReadOnlyList<string>>? warningsOf,
-        string method)
+        string method,
+        IReadOnlyDictionary<int, IReadOnlyList<ElementId>>? alsoCreated = null)
     {
         for (var position = 0; position < results.Length; position++)
         {
@@ -152,6 +183,18 @@ internal static class ItemBatch
                         Status = ItemStatus.Failed,
                         ElementId = null,
                         Error = $"Revit removed this element when it committed the batch (it was created as {id} and is gone). The rest of the batch landed.",
+                    };
+                    continue;
+                }
+
+                if (alsoCreated is not null && alsoCreated.TryGetValue(position, out var others) && others.FirstOrDefault(other => document.GetElement(other) is null) is { } gone)
+                {
+                    Log.Error($"{method} element {gone} is gone after the commit.");
+                    results[position] = created with
+                    {
+                        Status = ItemStatus.Failed,
+                        ElementId = null,
+                        Error = $"Revit removed element {gone} of this item when it committed the batch, so the item did not land whole. It made {id}, {string.Join(", ", others)}, and {gone} is gone. The rest of the batch landed.",
                     };
                     continue;
                 }
