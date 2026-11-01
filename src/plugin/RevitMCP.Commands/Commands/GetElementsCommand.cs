@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Architecture;
 using RevitMCP.Bridge;
 using RevitMCP.Commands.Dispatch;
 
@@ -12,7 +13,7 @@ namespace RevitMCP.Commands;
 /// answer. A category lists the elements of the model, not their types, by ID, and stops at
 /// <see cref="ElementIds.MaxListed"/>: <c>truncated</c> says that more matched. The keys <c>elements</c>,
 /// <c>notFound</c> and <c>truncated</c> are always present. <c>boundingBoxMm</c> is the model box, aligned to the model
-/// axes, and null when Revit knows none.
+/// axes, and null when Revit knows none. A wall also has <c>topMm</c>, and a room <c>name</c>, <c>number</c> and <c>areaM2</c>.
 /// </summary>
 public sealed class GetElementsCommand : ICommand
 {
@@ -117,6 +118,14 @@ public sealed class GetElementsCommand : ICommand
         if (element is Wall wall)
         {
             description["topMm"] = WallGeometry.TopMm(wall);
+        }
+
+        // A room is told apart by its name and its area: a room that encloses nothing reads 0.
+        if (element is Room room)
+        {
+            description["name"] = CreateRoomsCommand.NameOf(room);
+            description["number"] = CreateRoomsCommand.NumberOf(room);
+            description["areaM2"] = Units.InternalToSquareMetres(room.Area);
         }
 
         return description;

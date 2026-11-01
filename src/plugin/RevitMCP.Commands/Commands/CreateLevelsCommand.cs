@@ -117,8 +117,9 @@ public sealed class CreateLevelsCommand : ICommand
     /// <summary>
     /// The floor plan of a level. <c>Level.FindAssociatedPlanViewId</c> is not used: it returns the first floor or
     /// structural plan, so it can name a structural plan, or miss the floor plan behind one.
+    /// <see cref="CreateRoomSeparatorsCommand"/> draws in this plan, and so tells a level that has one.
     /// </summary>
-    private static ViewPlan? FindFloorPlan(Document document, Level level) =>
+    internal static ViewPlan? FindFloorPlan(Document document, Level level) =>
         new FilteredElementCollector(document)
             .OfClass(typeof(ViewPlan))
             .Cast<ViewPlan>()

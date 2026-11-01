@@ -62,6 +62,8 @@ const run = { startMm: { x: 0, y: 0 }, endMm: { x: 0, y: 3750 } };
 const stairs = { baseLevelId: "311", topLevelId: "694", typeId: "7", runsMm: [run], widthMm: 1000, desiredRisers: 16 };
 const railingOnStairs = { stairsId: "300", typeId: "25223", position: "treads" };
 const railingOnPath = { pathMm: [{ x: 0, y: 0 }, { x: 3000, y: 0 }, { x: 3000, y: 2000 }], typeId: "25223", levelId: "2" };
+const room = { levelId: "2", pointMm: { x: 5000, y: 3000 }, name: "Гостиная", number: "101" };
+const separator = { levelId: "2", startMm: { x: 5000, y: 0 }, endMm: { x: 5000, y: 6000 } };
 const material = { name: "Краснодарский кирпич", colorRgb: { r: 170, g: 40, b: 35 } };
 const layer = { thicknessMm: 200, materialId: "7", function: "structure" };
 const typeItem = { category: "walls", baseTypeId: "408", name: "Стена 250 мм" };
@@ -88,6 +90,8 @@ describe("MCP tools", { timeout: 20_000 }, () => {
         "create_project",
         "create_railings",
         "create_roof",
+        "create_room_separators",
+        "create_rooms",
         "create_stairs",
         "create_type",
         "create_walls",
@@ -462,6 +466,37 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     ["create_railings", { items: [{ ...railingOnPath, levelId: 2 }] }],
     ["create_railings", { items: [{ ...railingOnPath, position: "treads" }] }],
     ["create_railings", { items: [{ ...railingOnPath, closed: true }] }],
+    ["create_rooms", {}],
+    ["create_rooms", { items: [] }],
+    ["create_rooms", { items: batch(501, room) }],
+    ["create_rooms", { items: [{}] }],
+    ["create_rooms", { items: [{ ...room, levelId: undefined }] }],
+    ["create_rooms", { items: [{ ...room, levelId: 2 }] }],
+    ["create_rooms", { items: [{ ...room, levelId: "" }] }],
+    ["create_rooms", { items: [{ ...room, pointMm: undefined }] }],
+    ["create_rooms", { items: [{ ...room, pointMm: { x: 1 } }] }],
+    ["create_rooms", { items: [{ ...room, pointMm: { x: 1, y: 2, z: 3 } }] }],
+    ["create_rooms", { items: [{ ...room, pointMm: { x: "1", y: 2 } }] }],
+    ["create_rooms", { items: [{ ...room, name: undefined }] }],
+    ["create_rooms", { items: [{ ...room, name: "" }] }],
+    ["create_rooms", { items: [{ ...room, name: 5 }] }],
+    ["create_rooms", { items: [{ ...room, number: 101 }] }],
+    ["create_rooms", { items: [{ ...room, number: "" }] }],
+    ["create_rooms", { items: [{ ...room, number: null }] }],
+    ["create_rooms", { items: [{ ...room, areaM2: 20 }] }],
+    ["create_room_separators", {}],
+    ["create_room_separators", { items: [] }],
+    ["create_room_separators", { items: batch(501, separator) }],
+    ["create_room_separators", { items: [{}] }],
+    ["create_room_separators", { items: [{ ...separator, levelId: undefined }] }],
+    ["create_room_separators", { items: [{ ...separator, levelId: 2 }] }],
+    ["create_room_separators", { items: [{ ...separator, startMm: undefined }] }],
+    ["create_room_separators", { items: [{ ...separator, startMm: { x: 0 } }] }],
+    ["create_room_separators", { items: [{ ...separator, startMm: { x: 0, y: 0, z: 100 } }] }],
+    ["create_room_separators", { items: [{ ...separator, endMm: undefined }] }],
+    ["create_room_separators", { items: [{ ...separator, endMm: { x: "0", y: 0 } }] }],
+    ["create_room_separators", { items: [{ ...separator, viewId: "3" }] }],
+    ["create_room_separators", { items: [{ ...separator, view: "3d" }] }],
     ["attach_walls", {}],
     ["attach_walls", { items: [] }],
     ["attach_walls", { items: batch(501, attachment) }],
@@ -815,6 +850,86 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(schema, /stairsId/);
     assert.match(schema, /pathMm/);
     assert.match(schema, /stringer/);
+  });
+
+  it("passes rooms and separators as they were given, with Cyrillic intact", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, { committed: true }));
+    const unnumbered = { levelId: "2", pointMm: { x: 1500.5, y: -2000 }, name: "Кухня-гостиная" };
+
+    const rooms = await client.callTool({ name: "create_rooms", arguments: { items: [room, unnumbered] } });
+    const lines = await client.callTool({ name: "create_room_separators", arguments: { items: [separator, { ...separator, startMm: { x: 0.5, y: -3 } }] } });
+
+    assert.ok(!rooms.isError);
+    assert.ok(!lines.isError);
+    assert.equal(bridge.frames[0]?.method, "create_rooms");
+    assert.deepEqual(bridge.frames[0]?.params, { items: [room, unnumbered] });
+    assert.equal(bridge.frames[1]?.method, "create_room_separators");
+    assert.deepEqual(bridge.frames[1]?.params, { items: [separator, { ...separator, startMm: { x: 0.5, y: -3 } }] });
+  });
+
+  it("passes the rooms category of list_types and get_elements to Revit", async (t) => {
+    const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, []));
+
+    assert.ok(!(await client.callTool({ name: "list_types", arguments: { category: "rooms" } })).isError);
+    assert.ok(!(await client.callTool({ name: "get_elements", arguments: { category: "rooms", levelId: "2" } })).isError);
+    assert.deepEqual(bridge.frames.map((frame) => frame.params), [{ category: "rooms" }, { category: "rooms", levelId: "2" }]);
+  });
+
+  it("tells the model the truth about create_rooms", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const tool = listed.find((entry) => entry.name === "create_rooms");
+    const description = tool?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    assert.match(description, /500/);
+    for (const word of ["created", "failed", "rolled_back", "not attempted", "actual"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /Revit does not refuse a room that encloses nothing/);
+    assert.match(description, /area of 0 fails its item and nothing lands/);
+    assert.match(description, /one room to a region/);
+    assert.match(description, /create_room_separators/);
+    assert.match(description, /actual is { name, number, areaM2, perimeterMm }/);
+    assert.match(description, /square metres and net of the walls/);
+    assert.match(description, /duplicate "Number" values/);
+    assert.match(description, /get_elements with rooms/);
+
+    const schema = JSON.stringify(tool?.inputSchema);
+    assert.match(schema, /pointMm/);
+    assert.match(schema, /number/);
+  });
+
+  it("tells the model the truth about create_room_separators", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const tool = listed.find((entry) => entry.name === "create_room_separators");
+    const description = tool?.description ?? "";
+
+    assert.match(description, /one Undo step/);
+    assert.match(description, /millimetres/);
+    assert.match(description, /500/);
+    for (const word of ["created", "failed", "rolled_back", "not attempted", "actual"]) {
+      assert.ok(description.includes(word), `should explain ${word}`);
+    }
+    assert.match(description, /floor plan of its level/);
+    assert.match(description, /createPlan false/);
+    assert.match(description, /refused before anything changes/);
+    assert.match(description, /The view that happens to be open in Revit is never used/);
+    assert.match(description, /divides nothing/);
+    assert.match(description, /Revit says nothing about that/);
+    assert.match(description, /compare their areaM2/);
+    assert.match(description, /Highlighted room separation lines overlap/);
+    assert.match(description, /create_rooms/);
+    assert.match(description, /delete_elements/);
+
+    const schema = JSON.stringify(tool?.inputSchema);
+    assert.match(schema, /startMm/);
+    assert.match(schema, /endMm/);
+    assert.doesNotMatch(schema, /viewId/, "a caller cannot name a view");
   });
 
   it("tells the model the truth about create_stairs", async (t) => {

@@ -22,6 +22,7 @@ internal static class CategoryMap
         ["stairs"] = BuiltInCategory.OST_Stairs,
         ["railings"] = BuiltInCategory.OST_StairsRailing,
         ["toposolid"] = BuiltInCategory.OST_Toposolid,
+        ["rooms"] = BuiltInCategory.OST_Rooms,
     };
 
     private static readonly Dictionary<BuiltInCategory, string> Words =

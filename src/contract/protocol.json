@@ -28,6 +28,8 @@
     "place_hosted",
     "create_stairs",
     "create_railings",
+    "create_rooms",
+    "create_room_separators",
     "attach_walls",
     "delete_elements",
     "undo_last_operation",

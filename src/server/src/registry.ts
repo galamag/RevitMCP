@@ -31,7 +31,7 @@ const MAX_SNAPSHOT_WIDTH_PX = 4096;
 const MAX_ELEMENT_IDS = 1000;
 
 /** The category words of list_types and get_elements, the same as `CategoryMap` in the plugin. */
-const ELEMENT_CATEGORIES = ["walls", "floors", "roofs", "ceilings", "doors", "windows", "furniture", "plumbing", "stairs", "railings", "toposolid"] as const;
+const ELEMENT_CATEGORIES = ["walls", "floors", "roofs", "ceilings", "doors", "windows", "furniture", "plumbing", "stairs", "railings", "toposolid", "rooms"] as const;
 
 /** The limits of the sun, which the plugin checks too. */
 const MAX_SUN_AZIMUTH_DEG = 360;
@@ -197,7 +197,7 @@ export const tools: readonly ToolDefinition[] = [
       "[{ id, family, name }] sorted by family, then name, then id, so the order holds between calls. ids are " +
       "strings: pass them back unchanged. family and name are Revit's own text, usually Russian: read them to choose " +
       "a type, and never guess or translate one. An empty list means that no type of this category is loaded in the " +
-      "project, not that the category is unknown. toposolid lists the types of ground for create_ground. view_templates is not a category of elements: it lists the 3D view " +
+      "project, not that the category is unknown. toposolid lists the types of ground for create_ground. rooms has no types, so its list is always empty: read rooms with get_elements. view_templates is not a category of elements: it lists the 3D view " +
       "templates for viewTemplateId of create_3d_view, in the same shape, with family as an empty string. " +
       "Related tools: get_elements, get_model_info, create_3d_view.",
     inputSchema: {
@@ -237,7 +237,9 @@ export const tools: readonly ToolDefinition[] = [
       "level. boundingBoxMm is { min: { x, y, z }, max: { x, y, z } } in millimetres in model coordinates, aligned " +
       "to the model axes and independent of any view. It can be larger than what is visible, and it is null when " +
       "Revit knows no box, as for a type. A wall also has topMm, in millimetres in model coordinates: its real top, read from its shape. " +
-      "A wall's box can keep an old height after the wall is cut by a roof, so read topMm for a wall and not boundingBoxMm. Other categories have no topMm. Related tools: list_types, get_model_info.",
+      "A wall's box can keep an old height after the wall is cut by a roof, so read topMm for a wall and not boundingBoxMm. Other categories have no topMm. " +
+      "A room, category rooms, also has name, number and areaM2: name is its name without the number, number is its number as text, and areaM2 is its area in square metres, net of the walls. " +
+      "A room that encloses nothing is still a room and reads areaM2 0, so check the areas to see which rooms are real. Related tools: list_types, get_model_info, create_rooms.",
     inputSchema: {
       ids: z.array(z.string().min(1)).min(1).max(MAX_ELEMENT_IDS).optional().describe("Element ids as strings, passed on unchanged from other tools. Give this or category, not both."),
       category: z.enum(ELEMENT_CATEGORIES).optional().describe("The category whose elements to list. Give this or ids, not both. These words stay the same whatever the language of Revit."),
@@ -824,6 +826,55 @@ export const tools: readonly ToolDefinition[] = [
             levelId: elementId("The id of the level the railing stands on, from get_model_info"),
           }),
         ]),
+      ),
+    },
+  },
+  {
+    name: "create_rooms",
+    description:
+      "Creates rooms in the active project, one for each point, with a name and a number. A room is the closed region that walls and room separators (create_room_separators) draw round a point, " +
+      "and its area is what that region really holds. Each item is { levelId, pointMm, name, number? }. Take levelId from get_model_info. pointMm is a point inside the space in millimetres in model coordinates, and its height comes from the level, " +
+      "so give a point well inside the space, never on a wall. name is the name shown on the plan, and Russian is fine and stays exactly as written. number is optional text such as \"101\": leave it out and Revit numbers the room itself, " +
+      "and actual.number says which number it chose. Revit accepts a number that two rooms share, and only warns Elements have duplicate \"Number\" values, so keep the numbers apart. " +
+      "Revit does not refuse a room that encloses nothing: it makes a room with an area of 0 and a warning. So this tool reads the area of each room after Revit has built it, and a room with an area of 0 fails its item and nothing lands, the whole call rolls back, with error saying what to check. " +
+      "That happens for a point outside a closed contour, for walls with a gap between them, for a point on the axis of a wall, for a level without walls, and for a second room in a region that has a room already: Revit allows one room to a region, " +
+      "so a kitchen and a living room that share one space need create_room_separators between them first, and then a room in each half. A level that has no floor plan view still takes rooms, as long as walls stand on it. " +
+      "actual is { name, number, areaM2, perimeterMm }, read from the model after the commit. areaM2 is in square metres and net of the walls: a box of walls 264 mm thick between axes 10000 x 6000 gives 9736 x 5736, so 55.85. " +
+      "perimeterMm is in millimetres, along the faces of the walls. The height of the room is left to Revit and not reported: walls from 1000 to 3000 mm high gave the same area. " +
+      BATCH_RULES +
+      " Related tools: create_room_separators, create_walls, get_elements with rooms, get_model_info, delete_elements, undo_last_operation, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.strictObject({
+          levelId: elementId("The id of the level the room stands on, from get_model_info"),
+          pointMm: planPoint("A point inside the space the room fills"),
+          name: z.string().min(1).describe("The name of the room, shown on the plan. Russian is fine."),
+          number: z.string().min(1).optional().describe("The number of the room as text, such as \"101\". Leave it out and Revit numbers the room itself."),
+        }),
+      ),
+    },
+  },
+  {
+    name: "create_room_separators",
+    description:
+      "Draws room separation lines: straight lines that close a room off where there is no wall, as between a kitchen and a living room in one open space. Each item is { levelId, startMm, endMm }: " +
+      "the two ends of the line in millimetres in model coordinates, and its height comes from the level. Take levelId from get_model_info. " +
+      "The line is drawn in the floor plan of its level, because Revit takes the level of a separator from the plan view it is drawn in. A level without a floor plan, as create_levels makes with createPlan false, " +
+      "is refused before anything changes, naming the levels that have one. The view that happens to be open in Revit is never used. " +
+      "A separator divides a room only if it runs from wall to wall: from the axis of one wall to the axis of another. A line that stops short of a wall divides nothing, " +
+      "and Revit says nothing about that: the item still comes back created, with no warning. So after drawing, make the rooms with create_rooms, one on each side, and compare their areaM2 with what you expect. " +
+      "A room that exists already is divided at once, and its area shrinks to its part; the other part is then a room to make with create_rooms. " +
+      "Do not draw one line over another, or along an earlier one: Revit accepts it and warns Highlighted room separation lines overlap. One of them may be ignored when Revit finds room boundaries, and the warning stays in the model. " +
+      "actual is { levelId, startMm, endMm }, read from the model after the commit. elementId is the separator: get_elements reads it by id, but no category word lists separators, so keep the ids. To take one away use delete_elements with its id, or undo_last_operation. " +
+      BATCH_RULES +
+      " Related tools: create_rooms, create_levels, create_walls, get_elements with rooms, get_warnings, delete_elements, undo_last_operation, save_project.",
+    inputSchema: {
+      items: batchOf(
+        z.strictObject({
+          levelId: elementId("The id of the level the line is drawn on, from get_model_info. It must have a floor plan"),
+          startMm: planPoint("One end of the line"),
+          endMm: planPoint("The other end of the line"),
+        }),
       ),
     },
   },

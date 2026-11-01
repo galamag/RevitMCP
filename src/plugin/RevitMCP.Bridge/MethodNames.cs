@@ -30,6 +30,8 @@ public static class MethodNames
     public const string PlaceHosted = "place_hosted";
     public const string CreateStairs = "create_stairs";
     public const string CreateRailings = "create_railings";
+    public const string CreateRooms = "create_rooms";
+    public const string CreateRoomSeparators = "create_room_separators";
     public const string AttachWalls = "attach_walls";
     public const string DeleteElements = "delete_elements";
     public const string UndoLastOperation = "undo_last_operation";
@@ -65,6 +67,8 @@ public static class MethodNames
         PlaceHosted,
         CreateStairs,
         CreateRailings,
+        CreateRooms,
+        CreateRoomSeparators,
         AttachWalls,
         DeleteElements,
         UndoLastOperation,
