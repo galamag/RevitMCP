@@ -209,7 +209,10 @@ internal static class ItemBatch
                 {
                     // The element is in the model, so it is not "gone": the error names it, as the caller has no other way to find it.
                     Log.Error($"{method} element {id} does not hold after the commit: {problem}");
-                    results[position] = created.FailedAfterCommit($"{problem} It is element {id}, and it is still in the model. The rest of the batch landed.");
+                    results[position] = created.FailedAfterCommit(
+                        landedStatus == ItemStatus.Created
+                            ? $"{problem} It is element {id}, and it is still in the model. The rest of the batch landed."
+                            : $"{problem} It is element {id}. The batch is committed with the change of this item in it, so the element is in the model as the commit left it: read it with get_elements. The rest of the batch landed.");
                     continue;
                 }
 
@@ -222,7 +225,7 @@ internal static class ItemBatch
             catch (Exception e)
             {
                 Log.Error($"{method} could not read back element {id}.", e);
-                results[position] = created with { Warnings = [$"Created, but it could not be read back: {e.Message}"] };
+                results[position] = created with { Warnings = [$"{(landedStatus == ItemStatus.Created ? "Created" : "Changed")}, but it could not be read back: {e.Message}"] };
             }
         }
     }

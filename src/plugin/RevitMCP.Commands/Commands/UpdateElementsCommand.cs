@@ -16,12 +16,16 @@ namespace RevitMCP.Commands;
 /// <para>
 /// Live Revit (the tests of this command): MoveElement accepts, with no warning and no exception, a wall moved up or down, a door moved across its
 /// wall, and the part of a move along a wall that is joined to others at its ends, and in each case leaves the element where it was. So the first two are
-/// refused before the transaction, and the third, which depends on the joins, fails its item with the real place in the message. A door moved along its
+/// refused before the transaction, and the third, which depends on the joins, fails its item with the real place in the message. A turn of a joined wall
+/// is refused by Revit at the commit, or lands off the line asked for, and fails its item the same way. A door moved along its
 /// wall past the end of it is refused only by the commit, and lands as rolled back with the reason in errors. A pin is the parameter
 /// <c>ELEMENT_LOCKED_PARAM</c> (true pins), and a pinned element is refused a move and a turn and nothing else.
 /// </para>
 /// <para>
-/// Only a length is converted, from millimetres, through <see cref="Units"/>. A double parameter can hold an angle, a plain number, an area, a volume
+/// Live Revit also stores the id of any element in an element parameter without a word, so an element parameter is written only when it is a level one this
+/// tool names (<see cref="LevelParameters"/>) and is given the id of a level; the parameters that change a type go through <c>typeId</c> and the phases are not written.
+/// After the last stage the type and the parameters of the item are read again, because a later parameter can undo an earlier one, and a mismatch fails the item
+/// inside the transaction. Only a length is converted, from millimetres, through <see cref="Units"/>. A double parameter can hold an angle, a plain number, an area, a volume
 /// or a slope as well, and each has its own unit (<see cref="Definition.GetDataType"/> says which), so a double whose data type is no length is refused
 /// naming its spec, and nothing is guessed. An element-id value must name an element that exists. The parameter of an element is looked up on the element
 /// itself, and a parameter of its type is not found there, so it reads as one the element does not have; if Revit ever hands back a parameter whose
@@ -59,6 +63,34 @@ public sealed class UpdateElementsCommand : ICommand
     /// <summary>Every name of <see cref="BuiltInParameter"/>, case-sensitive. Parsing a number would also succeed, and a number is no name.</summary>
     private static readonly HashSet<string> BuiltInNames = new(Enum.GetNames<BuiltInParameter>(), StringComparer.Ordinal);
 
+    /// <summary>
+    /// Parameters that change the type of an element. <c>typeId</c> does that and asks Revit first whether the type is valid for the element, which these
+    /// do not: live Revit threw "External component has thrown an exception" for a door and a bed given a type through them.
+    /// </summary>
+    private static readonly HashSet<BuiltInParameter> TypeParameters =
+    [
+        BuiltInParameter.ELEM_TYPE_PARAM,
+        BuiltInParameter.ELEM_FAMILY_AND_TYPE_PARAM,
+        BuiltInParameter.ELEM_FAMILY_PARAM,
+        BuiltInParameter.SYMBOL_ID_PARAM,
+    ];
+
+    /// <summary>The phase of an element. -1 cannot be written, so a phase demolished could never be cleared again, and a building needs none.</summary>
+    private static readonly HashSet<BuiltInParameter> PhaseParameters = [BuiltInParameter.PHASE_CREATED, BuiltInParameter.PHASE_DEMOLISHED];
+
+    /// <summary>
+    /// The element parameters this tool writes, all of which take a level, named by RevitAPI.xml as "Base Constraint", "Top Constraint" and "Level". Live Revit
+    /// takes the id of any element for an element parameter without a word: a wall was stored as the top constraint of a wall, as the level of a bed and as a phase.
+    /// So an element parameter outside this list is refused, and one in it takes a level and nothing else.
+    /// </summary>
+    private static readonly HashSet<BuiltInParameter> LevelParameters =
+    [
+        BuiltInParameter.WALL_BASE_CONSTRAINT,
+        BuiltInParameter.WALL_HEIGHT_TYPE,
+        BuiltInParameter.FAMILY_LEVEL_PARAM,
+        BuiltInParameter.LEVEL_PARAM,
+    ];
+
     public string Method => MethodNames.UpdateElements;
 
     public bool NeedsDocument => true;
@@ -81,7 +113,7 @@ public sealed class UpdateElementsCommand : ICommand
             entries,
             input => Apply(document, input),
             element => Describe(document, element, asked[element.Id]),
-            problemAfterCommit: element => ProblemAfterCommit(element, asked[element.Id]),
+            problemAfterCommit: element => ProblemOf(element, asked[element.Id], "After the commit") is { } problem ? problem + "." : null,
             landedStatus: ItemStatus.Updated);
     }
 
@@ -109,7 +141,18 @@ public sealed class UpdateElementsCommand : ICommand
             Write(document, element, wanted);
         }
 
-        return document.GetElement(input.Id) ?? throw new InvalidOperationException($"Element {input.Id} is not in the model after the change.");
+        var landed = document.GetElement(input.Id) ?? throw new InvalidOperationException($"Element {input.Id} is not in the model after the change.");
+
+        // Each stage was checked when it ended, and a later one can undo it: live Revit sets the unconnected height of a wall when its top constraint is set. Seen
+        // only after the commit, that would be a change that stays in the model under a failed item.
+        if (ProblemOf(landed, input, "At the end of the item") is { } problem)
+        {
+            throw new InvalidOperationException(
+                $"{problem}: a later change of this item undid it. The stages of an item run one after the other, and Revit changes some parameters when it is given another. "
+                + "Leave one of the two out, or write it in a call of its own after the other.");
+        }
+
+        return landed;
     }
 
     private static void MoveBy(Document document, Element element, XYZ by)
@@ -148,6 +191,7 @@ public sealed class UpdateElementsCommand : ICommand
         var about = before.AxisPoint;
         var angle = Units.DegToRad(degrees);
         var host = HostOf(element);
+        var joined = JoinedEnds(element);
 
         ElementTransformUtils.RotateElement(document, element.Id, Line.CreateBound(about, about + XYZ.BasisZ), angle);
         document.Regenerate();
@@ -164,7 +208,10 @@ public sealed class UpdateElementsCommand : ICommand
         {
             throw new InvalidOperationException(
                 $"Revit took the turn by {Units.FormatNumber(degrees)} degrees about the vertical through ({Units.FormatNumber(Units.InternalToMm(about.X))}, {Units.FormatNumber(Units.InternalToMm(about.Y))}) mm, "
-                + $"but {What(element)} {difference}. It was {before.Describe()}.");
+                + $"but {What(element)} {difference}. It was {before.Describe()}."
+                + (joined > 0
+                    ? $" The wall is joined to other walls at its ends ({joined} joins), and Revit keeps a joined end on its neighbour, so the turn lands as the joins allow and not on the line asked for."
+                    : string.Empty));
         }
 
         RequireSameHost(element, host, after);
@@ -172,20 +219,22 @@ public sealed class UpdateElementsCommand : ICommand
 
     private static void Retype(Document document, Element element, ElementId typeId)
     {
+        // Before the change: when Revit replaces the element, the old one is invalid and has no category to read.
+        var what = What(element);
         var replacement = element.ChangeTypeId(typeId);
 
         if (!SameId(replacement, ElementId.InvalidElementId))
         {
             // Revit's own words: this happens for a normal wall type given to a curtain panel, and the old element becomes invalid.
             throw new InvalidOperationException(
-                $"Revit did not change the type of {What(element)} in place: it made a new element {replacement} and the old one is gone. Nothing of this call stays.");
+                $"Revit did not change the type of {what} in place: it made a new element {replacement} and the old one is gone. Nothing of this call stays.");
         }
 
         document.Regenerate();
 
         if (!SameId(document.GetElement(element.Id)?.GetTypeId(), typeId))
         {
-            throw new InvalidOperationException($"Revit took the new type {typeId} for {What(element)}, but the element does not hold it.");
+            throw new InvalidOperationException($"Revit took the new type {typeId} for {what}, but the element does not hold it.");
         }
     }
 
@@ -239,12 +288,15 @@ public sealed class UpdateElementsCommand : ICommand
     /// <summary>Two IDs are the same when their values are, and both being absent is the same too.</summary>
     private static bool SameId(ElementId? first, ElementId? second) => first is null ? second is null : second is not null && first.Value == second.Value;
 
-    /// <summary>What an item can no longer be taken for after the commit: the type and the parameters, which no later item changes. Where an element stands may be moved by the item of its host, so that is not judged here.</summary>
-    private static string? ProblemAfterCommit(Element element, UpdateInput input)
+    /// <summary>
+    /// Why the element does not hold what the item asked of its type and its parameters, or null when it does. Asked at the end of the item, where a later stage may have
+    /// undone an earlier one, and after the commit. Where an element stands is not judged here: the item of its host may have moved it.
+    /// </summary>
+    private static string? ProblemOf(Element element, UpdateInput input, string when)
     {
         if (input.TypeId is { } typeId && !SameId(element.GetTypeId(), typeId))
         {
-            return $"After the commit the element holds type {element.GetTypeId()} and not the {typeId} asked for.";
+            return $"{when} the element holds type {element.GetTypeId()} and not the {typeId} asked for";
         }
 
         foreach (var wanted in input.Parameters)
@@ -253,7 +305,7 @@ public sealed class UpdateElementsCommand : ICommand
 
             if (parameter is null || !wanted.Holds(parameter))
             {
-                return $"After the commit parameter {wanted.Name} holds {wanted.ReadText(parameter)} and not the {wanted.Show} asked for.";
+                return $"{when} parameter {wanted.Name} holds {wanted.ReadText(parameter)} and not the {wanted.Show} asked for";
             }
         }
 
@@ -279,9 +331,13 @@ public sealed class UpdateElementsCommand : ICommand
             throw reader.Refuse("it asks for no change. An item needs at least one of moveMm, rotateDeg, typeId and parameters (a list with at least one entry).");
         }
 
-        if (move is not null || turn is not null)
+        // Only a move or a turn that changes something is judged: a move by nothing and a turn of 360 degrees are nothing for a floor or a door as well.
+        var moves = move is not null && !IsZero(move);
+        var turns = turn is not null && Normalize(turn.Value) != 0;
+
+        if (moves || turns)
         {
-            CheckCanMoveOrTurn(reader, element, what, move, turn is not null);
+            CheckCanMoveOrTurn(reader, element, what, moves ? move : null, turns);
         }
 
         // Live Revit: a wall moved up or down by MoveElement is committed with no warning and stays where it was. Its height is a base offset and a base level.
@@ -433,6 +489,15 @@ public sealed class UpdateElementsCommand : ICommand
                 + ".");
         }
 
+        // Live Revit: a wall given a curtain wall type is committed with one warning, "All inserts in the element will be deleted", and its door is gone.
+        if (element is Wall wall && type is WallType { Kind: WallKind.Curtain } && wall.WallType.Kind != WallKind.Curtain
+            && wall.FindInserts(true, false, false, false) is { Count: > 0 } inserts)
+        {
+            throw reader.Refuse(
+                $"{typeText} is a curtain wall type, and {what} holds {inserts.Count} inserts ({string.Join(", ", inserts)}): Revit gives the type, deletes every insert of the wall and only warns of it. "
+                + "Take them away with delete_elements first, where dryRun shows what goes, or leave the wall as it is.");
+        }
+
         return id;
     }
 
@@ -487,6 +552,20 @@ public sealed class UpdateElementsCommand : ICommand
     private static Wanted ReadWanted(Document document, ItemReader reader, Element element, string what, JsonElement entry, string name, string where)
     {
         var builtIn = Enum.Parse<BuiltInParameter>(name);
+
+        if (TypeParameters.Contains(builtIn))
+        {
+            throw reader.Refuse(
+                $"{where} {name} would change the type of {what}, and is refused: use typeId, which asks Revit whether the type is valid for the element first, and then changes the type in place.");
+        }
+
+        if (PhaseParameters.Contains(builtIn))
+        {
+            throw reader.Refuse(
+                $"{where} {name} is a phase of the element, and phases are not written here: Revit takes the id of any element for it (a wall was stored as a phase), and -1, which means none, cannot be written, "
+                + "so a phase could not be cleared again. A building needs no phases here.");
+        }
+
         var parameter = element.get_Parameter(builtIn)
             ?? throw reader.Refuse(
                 $"{where} {name} is a BuiltInParameter, but {what} has no such parameter. A parameter of the type of an element is not its own, and is not written here.");
@@ -533,9 +612,15 @@ public sealed class UpdateElementsCommand : ICommand
                     return new WantedWhole(builtIn, name, value.ValueKind == JsonValueKind.True ? 1 : 0, true);
                 }
 
-                return value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var whole)
+                if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var whole))
+                {
+                    throw reader.Refuse($"{where} {name} holds a whole number, so value must be a whole number{(yesNo ? " or true or false" : string.Empty)}, not {value.GetRawText()}.");
+                }
+
+                // A yes/no holds 0 or 1: any other whole number is not a yes or a no, and Revit would not say so.
+                return !yesNo || whole is 0 or 1
                     ? new WantedWhole(builtIn, name, whole, yesNo)
-                    : throw reader.Refuse($"{where} {name} holds a whole number, so value must be a whole number{(yesNo ? " or true or false" : string.Empty)}, not {value.GetRawText()}.");
+                    : throw reader.Refuse($"{where} {name} is a yes/no, so value must be true, false, 0 or 1, not {value.GetRawText()}.");
 
             case StorageType.String:
                 return value.ValueKind == JsonValueKind.String
@@ -543,14 +628,31 @@ public sealed class UpdateElementsCommand : ICommand
                     : throw reader.Refuse($"{where} {name} holds text, so value must be text, not {value.GetRawText()}.");
 
             case StorageType.ElementId:
+                if (!LevelParameters.Contains(builtIn))
+                {
+                    throw reader.Refuse(
+                        $"{where} {name} holds an element, and this tool writes only the element parameters whose kind of element it can check: {string.Join(", ", LevelParameters.Select(level => level.ToString()))}, which take a level. "
+                        + "Revit takes any element for the others without a word (a wall was stored as the top constraint of a wall, as the level of a bed and as an image), so they are refused.");
+                }
+
                 if (value.ValueKind != JsonValueKind.String)
                 {
                     throw reader.Refuse($"{where} {name} holds an element, so value must be an element id, as text, not {value.GetRawText()}.");
                 }
 
-                return ElementIds.TryParse(value.GetString()!, out var id) && document.GetElement(id) is not null
+                var text = value.GetString()!;
+
+                if (!ElementIds.TryParse(text, out var id) || document.GetElement(id) is not { } found)
+                {
+                    throw reader.Refuse(
+                        $"{where} {name}: no element has the id {text}. The value of an element parameter is the id of an element that exists"
+                        + (text == "-1" ? ". -1 means none, and a parameter cannot be cleared with this tool: a wall on a top constraint cannot go back to Unconnected here." : "."));
+                }
+
+                // Live Revit stores the id of any element, so the kind is checked here.
+                return found is Level
                     ? new WantedReference(builtIn, name, id)
-                    : throw reader.Refuse($"{where} {name}: no element has the id {value.GetString()}. The value of an element parameter is the id of an element that exists.");
+                    : throw reader.Refuse($"{where} {name} must be the id of a level, and {What(found)} is not one. Take a level from get_model_info.");
 
             default:
                 throw reader.Refuse($"{where} {name} has the storage type {parameter.StorageType}, which this tool does not write.");
@@ -717,7 +819,8 @@ public sealed class UpdateElementsCommand : ICommand
 
         public abstract object? Read(Parameter? parameter);
 
-        public string ReadText(Parameter? parameter) => Read(parameter) is { } value ? JsonSerializer.Serialize(value) : "no value";
+        /// <summary>The value the parameter holds, for a message, in the units of the contract.</summary>
+        public abstract string ReadText(Parameter? parameter);
     }
 
     private sealed record WantedLength(BuiltInParameter Parameter, string Name, double Mm) : Wanted(Parameter, Name)
@@ -729,6 +832,8 @@ public sealed class UpdateElementsCommand : ICommand
         public override bool Set(Parameter parameter) => parameter.Set(Units.MmToInternal(Mm));
 
         public override object? Read(Parameter? parameter) => parameter is null ? null : Units.InternalToMm(parameter.AsDouble());
+
+        public override string ReadText(Parameter? parameter) => parameter is null ? "no value" : $"{Units.FormatNumber(Units.InternalToMm(parameter.AsDouble()))} mm";
     }
 
     private sealed record WantedWhole(BuiltInParameter Parameter, string Name, int Value, bool YesNo) : Wanted(Parameter, Name)
@@ -741,6 +846,9 @@ public sealed class UpdateElementsCommand : ICommand
 
         public override object? Read(Parameter? parameter) =>
             parameter is null ? null : YesNo ? parameter.AsInteger() != 0 : parameter.AsInteger();
+
+        public override string ReadText(Parameter? parameter) =>
+            parameter is null ? "no value" : YesNo ? (parameter.AsInteger() != 0 ? "true" : "false") : parameter.AsInteger().ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private sealed record WantedText(BuiltInParameter Parameter, string Name, string Value) : Wanted(Parameter, Name)
@@ -752,6 +860,8 @@ public sealed class UpdateElementsCommand : ICommand
         public override bool Set(Parameter parameter) => parameter.Set(Value);
 
         public override object? Read(Parameter? parameter) => parameter is null ? null : parameter.AsString() ?? string.Empty;
+
+        public override string ReadText(Parameter? parameter) => parameter is null ? "no value" : $"'{parameter.AsString() ?? string.Empty}'";
     }
 
     private sealed record WantedReference(BuiltInParameter Parameter, string Name, ElementId Value) : Wanted(Parameter, Name)
@@ -763,6 +873,8 @@ public sealed class UpdateElementsCommand : ICommand
         public override bool Set(Parameter parameter) => parameter.Set(Value);
 
         public override object? Read(Parameter? parameter) => parameter?.AsElementId().ToString();
+
+        public override string ReadText(Parameter? parameter) => parameter is null ? "no value" : $"element {parameter.AsElementId()}";
     }
 
     /// <param name="Move">The vector of the move, in feet, or null.</param>

@@ -277,6 +277,18 @@ async function doorIn(client: BridgeClient, wallId: string, offsetAlongWallMm: n
   return door.elementId;
 }
 
+/** A floor of 3000 x 3000 on the ground level, with its corner at x 0 and the y given. */
+async function floorAt(client: BridgeClient, y: number): Promise<string> {
+  const w = ready();
+  const batch = (await client.call("create_floors", {
+    items: [{ boundaryMm: [{ x: 0, y }, { x: 3000, y }, { x: 3000, y: y + 3000 }, { x: 0, y: y + 3000 }], typeId: w.floorType.id, levelId: w.ground.id }],
+  })) as Batch<unknown>;
+  const floor = batch.items[0];
+  assert.ok(batch.committed && floor?.elementId && floor.status === "created", JSON.stringify(batch).slice(0, 800));
+
+  return floor.elementId;
+}
+
 /** A bed of the type given, standing on the ground level at a point. */
 async function bedAt(client: BridgeClient, typeId: string, x: number, y: number): Promise<string> {
   const w = ready();
@@ -483,9 +495,16 @@ describe("stage 3 live checks: element updates", { timeout: 900_000 }, () => {
       assertNear(wall.actual.endMm?.x, 3000, "end x", BOX_NEAR_MM / 10);
       assertNear(wall.actual.endMm?.y, y + 3000, "end y", BOX_NEAR_MM / 10);
 
-      // The door turned with its wall: its box is not where it was.
+      // The door turned with its wall: its box is not where it was, and it stands at the same 2000 mm from the start of the wall, now on the line x 3000, 1000 south of the middle.
       const doorAfter = await boxOf(client, doorId);
       assert.ok(Math.abs(doorAfter.min.x - doorBefore.min.x) > 100 && Math.abs(doorAfter.min.y - doorBefore.min.y) > 100, "the door went with the wall");
+      assertNear((doorAfter.min.y + doorAfter.max.y) / 2, y - 1000, "the middle of the door along the turned wall", BOX_NEAR_MM);
+      assertNear(sizeOf(doorAfter).y, sizeOf(doorBefore).x, "the door is as wide along the wall as it was", BOX_NEAR_MM);
+
+      // And it is still an insert of the wall at that place: an opening on top of it is refused naming the door, which only a door that cuts the wall there can cause.
+      const w = ready();
+      const refused = await refusal(client, "place_hosted", { items: [{ typeId: w.door.id, wallId, offsetAlongWallMm: 2000 }] });
+      assert.match(refused.message, new RegExp(`door ${doorId} that is in wall ${wallId}`));
     });
   });
 
@@ -772,6 +791,152 @@ describe("stage 3 live checks: element updates", { timeout: 900_000 }, () => {
       landed(await update(client, [{ id: wallId, moveMm: { x: 1000, y: 2000, z: 0 } }, { id: doorId, moveMm: { x: 500, y: 0, z: 0 } }]), "updated", "updated");
 
       assertShifted(doorBefore, await boxOf(client, doorId), { x: 1500, y: 2000, z: 0 }, "door");
+    });
+  });
+
+  it("a level parameter takes a level, and the model says the element is on it", async () => {
+    await withClient(async (client) => {
+      const w = ready();
+      const { id: wallId } = await wallAlongX(client);
+      const bedId = await bedAt(client, w.beds[0]!.id, 1000, scene());
+      const floorId = await floorAt(client, scene());
+
+      // The top constraint of a wall is a level: the wall now ends at the level, 4000 up.
+      const [wall] = landed(await update(client, [{ id: wallId, parameters: [{ builtIn: "WALL_HEIGHT_TYPE", value: w.upper.id }] }]), "updated");
+      assert.equal(wall?.actual.parameters[0]?.value, w.upper.id);
+      assertNear((await rowOf(client, wallId)).topMm, STOREY_MM, "the top of the wall at the upper level");
+      landed(await update(client, [{ id: wallId, parameters: [{ builtIn: "WALL_HEIGHT_TYPE", value: w.upper.id }] }]), "unchanged");
+
+      // The level of an instance and of a floor, read another way: get_elements says which level they are on.
+      landed(await update(client, [{ id: bedId, parameters: [{ builtIn: "FAMILY_LEVEL_PARAM", value: w.upper.id }] }, { id: floorId, parameters: [{ builtIn: "LEVEL_PARAM", value: w.upper.id }] }]), "updated", "updated");
+      assert.equal((await rowOf(client, bedId)).levelId, w.upper.id);
+      assert.equal((await rowOf(client, floorId)).levelId, w.upper.id);
+    });
+  });
+
+  it("an element id of the wrong kind, a type, a phase and any other element parameter are refused before any change", async () => {
+    await withClient(async (client) => {
+      const w = ready();
+      const { id: wallId } = await wallAlongX(client);
+      const { id: otherId } = await wallAlongX(client);
+      const doorId = await doorIn(client, otherId, 2000);
+      const bedId = await bedAt(client, w.beds[0]!.id, 1000, scene());
+      const floorId = await floorAt(client, scene());
+      const level = /must be the id of a level/;
+      const typeParameter = /use typeId/;
+      const phase = /phase/;
+      const other = /holds an element, and this tool writes only/;
+
+      // Revit takes any element for these parameters without a word: a wall was stored as the top constraint of a wall, and as its phase.
+      const cases: Array<[string, string, string, string, RegExp]> = [
+        ["a wall as the base level", wallId, "WALL_BASE_CONSTRAINT", otherId, level],
+        ["a door as the base level", wallId, "WALL_BASE_CONSTRAINT", doorId, level],
+        ["a wall type as the top constraint", wallId, "WALL_HEIGHT_TYPE", w.wallType.id, level],
+        ["a wall as the level of a bed", bedId, "FAMILY_LEVEL_PARAM", wallId, level],
+        ["a wall type as the level of a floor", floorId, "LEVEL_PARAM", w.wallType.id, level],
+        ["none as the top constraint", wallId, "WALL_HEIGHT_TYPE", "-1", /WALL_HEIGHT_TYPE.*no element has the id -1.*cannot be cleared/s],
+        ["the type of a wall", wallId, "ELEM_TYPE_PARAM", w.wallType.id, typeParameter],
+        ["the family and type of a bed", bedId, "ELEM_FAMILY_AND_TYPE_PARAM", w.beds[0]!.id, typeParameter],
+        ["the family of a door", doorId, "ELEM_FAMILY_PARAM", w.door.id, typeParameter],
+        ["the type id of a wall", wallId, "SYMBOL_ID_PARAM", w.wallType.id, typeParameter],
+        ["the phase created of a wall", wallId, "PHASE_CREATED", otherId, phase],
+        ["the phase demolished of a bed", bedId, "PHASE_DEMOLISHED", otherId, phase],
+        ["the image of a wall", wallId, "ALL_MODEL_IMAGE", otherId, other],
+        ["the clear cover of a wall", wallId, "CLEAR_COVER_EXTERIOR", otherId, other],
+        ["the routing preference of a bed", bedId, "ROUTING_PREFERENCE_PARAM", otherId, other],
+      ];
+
+      for (const [what, id, builtIn, value, pattern] of cases) {
+        await refusedAndUnchanged(client, [{ id, parameters: [{ builtIn, value }] }], pattern, what);
+      }
+    });
+  });
+
+  it("a later parameter that undoes an earlier one of the same item rolls the call back", async () => {
+    await withClient(async (client) => {
+      const w = ready();
+      const { id: wallId } = await wallAlongX(client);
+      const before = await rowOf(client, wallId);
+
+      // Setting the top constraint sets the unconnected height too, so the 3500 does not survive the second parameter. That used to be seen only after the commit.
+      const batch = await update(client, [
+        { id: wallId, parameters: [{ builtIn: "WALL_USER_HEIGHT_PARAM", value: 3500 }, { builtIn: "WALL_HEIGHT_TYPE", value: w.upper.id }] },
+      ]);
+
+      assert.equal(batch.committed, false, JSON.stringify(batch).slice(0, 1200));
+      assert.equal(batch.items[0]?.status, "failed");
+      assert.match(batch.items[0]?.error ?? "", /WALL_USER_HEIGHT_PARAM.*3500.*a later change of this item/s);
+      assert.equal(batch.items[0]?.elementId, null);
+      assert.equal((await rowOf(client, wallId)).topMm, before.topMm, "the wall is as it was");
+    });
+  });
+
+  it("a yes/no takes true, false, 0 and 1, and nothing else", async () => {
+    await withClient(async (client) => {
+      const { id: wallId } = await wallAlongX(client);
+      const roomBounding = (value: unknown): UpdateItem => ({ id: wallId, parameters: [{ builtIn: "WALL_ATTR_ROOM_BOUNDING", value }] });
+
+      const [off] = landed(await update(client, [roomBounding(0)]), "updated");
+      assert.strictEqual(off?.actual.parameters[0]?.value, false);
+      const [on] = landed(await update(client, [roomBounding(1)]), "updated");
+      assert.strictEqual(on?.actual.parameters[0]?.value, true);
+      landed(await update(client, [roomBounding(true)]), "unchanged");
+
+      await refusedAndUnchanged(client, [roomBounding(2)], /yes.no.*true, false, 0 or 1/s, "2 for a yes/no");
+      await refusedAndUnchanged(client, [roomBounding(-1)], /yes.no.*true, false, 0 or 1/s, "-1 for a yes/no");
+    });
+  });
+
+  it("a move by nothing and a turn by nothing change nothing, whatever the element", async () => {
+    await withClient(async (client) => {
+      const { id: wallId } = await wallAlongX(client);
+      const doorId = await doorIn(client, wallId, 2000);
+      const floorId = await floorAt(client, scene());
+      await saved(client);
+
+      // A door is never turned and a floor is never moved, but nothing is asked of them here, so nothing is refused.
+      landed(await update(client, [{ id: doorId, rotateDeg: 360 }, { id: floorId, moveMm: { x: 0, y: 0, z: 0 } }]), "unchanged", "unchanged");
+      landed(await update(client, [{ id: doorId, rotateDeg: 0, moveMm: { x: 0, y: 0, z: 0 } }]), "unchanged");
+      assert.equal(await isModified(client), false);
+    });
+  });
+
+  it("a joined wall is not turned, and the failure says why", async () => {
+    await withClient(async (client) => {
+      const { ids } = await joinedRoom(client);
+      const [south] = ids;
+      assert.ok(south);
+      const before = await Promise.all(ids.map((id) => boxOf(client, id)));
+      await saved(client);
+
+      // Revit keeps the ends of the wall on its neighbours, so a small turn lands the wall off the line asked for: the item fails and the call is rolled back.
+      const small = (await client.call("update_elements", { items: [{ id: south, rotateDeg: 10 }] })) as Batch<UpdateActual>;
+      assert.equal(small.committed, false, JSON.stringify(small).slice(0, 1000));
+      assert.equal(small.items[0]?.status, "failed");
+      assert.match(small.items[0]?.error ?? "", /joined to other walls at its ends/);
+
+      // A quarter turn Revit refuses at the commit, and says so in errors.
+      const quarter = (await client.call("update_elements", { items: [{ id: south, rotateDeg: 90 }] })) as Batch<UpdateActual>;
+      assert.equal(quarter.committed, false, JSON.stringify(quarter).slice(0, 1000));
+      assert.equal(quarter.items[0]?.status, "rolled_back");
+      assert.ok(quarter.errors.length > 0, "Revit says why in errors");
+
+      assert.deepEqual(await Promise.all(ids.map((id) => boxOf(client, id))), before, "no wall of the room moved");
+    });
+  });
+
+  it("a wall with a door in it is not given a curtain wall type, which would delete the door", async () => {
+    await withClient(async (client) => {
+      const { id: wallId } = await wallAlongX(client);
+      const doorId = await doorIn(client, wallId, 2000);
+      const curtain = (await listTypes(client, "walls")).find((row) => row.family === "Curtain Wall");
+      assert.ok(curtain);
+      const typeName = (await rowOf(client, wallId)).typeName;
+
+      // Revit gives the type, deletes every insert of the wall, and only warns of it.
+      await refusedAndUnchanged(client, [{ id: wallId, typeId: curtain.id }], /curtain wall type.*delete_elements/s, "a curtain wall type for a wall with a door");
+      assert.equal((await rowOf(client, wallId)).typeName, typeName, "the wall keeps its type");
+      assert.equal((await rowOf(client, doorId)).category, "doors", "the door is still there");
     });
   });
 
