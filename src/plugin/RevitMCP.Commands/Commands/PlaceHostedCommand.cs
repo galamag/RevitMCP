@@ -128,6 +128,8 @@ public sealed class PlaceHostedCommand : ICommand
         var expected = input.Point;
         var actual = location.Point;
 
+        // The point asked for lies on the axis as it stands now, at the offset from its start, so this is the check of the place along the wall too.
+        // FamilyInstance.HostParameter cannot do it: live Revit counts that from where the wall started when it was drawn, and read 0 for an opening 1000 mm from a start that had moved.
         if (Math.Abs(Units.InternalToMm(actual.X - expected.X)) > SamePositionMm || Math.Abs(Units.InternalToMm(actual.Y - expected.Y)) > SamePositionMm)
         {
             throw new InvalidOperationException($"Revit placed the instance at {Format(actual)} mm and not at {Format(expected)} mm, which is where offsetAlongWallMm {Units.FormatNumber(input.OffsetMm)} lies on the axis of the wall.");
@@ -142,13 +144,6 @@ public sealed class PlaceHostedCommand : ICommand
         if (instance.LevelId != input.LevelId)
         {
             throw new InvalidOperationException($"Revit put the instance on level {instance.LevelId} and not on level {input.LevelId}, the base level of the wall, so sillHeightMm is not measured from it.");
-        }
-
-        var alongMm = Units.InternalToMm(instance.HostParameter);
-
-        if (Math.Abs(alongMm - input.OffsetMm) > SamePositionMm)
-        {
-            throw new InvalidOperationException($"Revit put the instance {Units.FormatNumber(alongMm)} mm along the wall and not the {Units.FormatNumber(input.OffsetMm)} mm asked for in offsetAlongWallMm.");
         }
 
         var sillMm = OpeningReader.SillMm(instance);

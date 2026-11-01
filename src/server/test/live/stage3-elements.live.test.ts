@@ -462,6 +462,47 @@ describe("stage 3 live checks: get_elements reads openings and areas", { timeout
     });
   });
 
+  it("a door and a window land at the offset asked for from the new start of a wall whose start moved", async () => {
+    await withClient(async (client) => {
+      const w = ready();
+      const x = scene();
+      const { ids } = await boxOfWalls(client, x);
+      const [south, east, north, west] = ids;
+
+      // Each neighbour moves across itself and takes the end of the next wall with it. The west wall lengthens the south wall at its start, the east wall lengthens the
+      // north wall, which is drawn right to left, at its start, and the south wall shortens the east wall at its start. None of them starts where it was drawn any more.
+      for (const [id, moveMm] of [[west, { x: -1000, y: 0, z: 0 }], [east, { x: 1000, y: 0, z: 0 }], [south, { x: 0, y: 500, z: 0 }]] as const) {
+        landed(await call<unknown>(client, "update_elements", [{ id, moveMm }]), "updated");
+      }
+
+      const left = x - 1000;
+      const right = x + BOX_WIDTH_MM + 1000;
+
+      // The door at 1000 stands where the south wall was drawn to start, which is the place the old check took for 0 along the wall. `along` is its place, by hand, on the axis the wall runs on.
+      const asked = [
+        { request: { typeId: w.door.id, wallId: south, offsetAlongWallMm: 1000 }, axis: "x", along: left + 1000 },
+        { request: { typeId: w.window.id, wallId: south, offsetAlongWallMm: 4000.5, sillHeightMm: 900 }, axis: "x", along: left + 4000.5 },
+        { request: { typeId: w.window.id, wallId: north, offsetAlongWallMm: 1500, sillHeightMm: 1000 }, axis: "x", along: right - 1500 },
+        { request: { typeId: w.door.id, wallId: east, offsetAlongWallMm: 1000 }, axis: "y", along: 500 + 1000 },
+      ] as const;
+      const placed = await place(client, asked.map((entry) => entry.request));
+
+      for (const [index, { request, axis, along }] of asked.entries()) {
+        const what = `opening ${index}`;
+        const item = placed[index]!;
+        const row = await rowOf(client, item.elementId);
+        console.log(`# ${what} on a wall whose start moved: ${JSON.stringify(row)}`);
+
+        assertNear(item.actual.offsetAlongWallMm, request.offsetAlongWallMm, `${what}: the offset place_hosted answers`);
+        assertNear(row.offsetAlongWallMm, request.offsetAlongWallMm, `${what}: the offset get_elements reads`);
+        assert.equal(row.hostId, request.wallId, what);
+        assert.equal(row.cutsWall, true, what);
+        assertNear(row.sillHeightMm, "sillHeightMm" in request ? request.sillHeightMm : 0, `${what}: sill`);
+        assertNear(centreOf(row.boundingBoxMm)[axis], along, `${what}: the middle of its box stands that far from the new start`, 1);
+      }
+    });
+  });
+
   it("sizes are those of the type, and a bare opening reads its rough size", async () => {
     await withClient(async (client) => {
       const w = ready();

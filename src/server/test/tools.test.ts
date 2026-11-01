@@ -1096,6 +1096,9 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /widthMm and heightMm are the size of the opening/);
     assert.match(description, /at the moment of this call/);
     assert.match(description, /read them with get_elements once the rooms exist/);
+    assert.match(description, /fromRoomId and toRoomId name the rooms on the two sides of the opening/);
+    assert.match(description, /They say nothing of the way a door swings: for that read facingFlipped and handFlipped/);
+    assert.doesNotMatch(description, /leads? from and to/, "the two ids name the sides, and a flip does not swap them");
     assert.match(description, /first instance of a type does not otherwise cut its wall/);
     assert.match(description, /list_types with doors or windows/);
     assert.match(description, /place_instances/);
@@ -1477,14 +1480,17 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /elements is \[\{ id, category, typeName, levelId, boundingBoxMm, topMm\?, name\?, number\?, areaM2\?, hostId\?, offsetAlongWallMm\?, sillHeightMm\?, widthMm\?, heightMm\?, facingFlipped\?, handFlipped\?, fromRoomId\?, toRoomId\?, cutsWall\? \}\]/);
     assert.match(description, /from the start of the axis of the wall as it stands now to the centre of the opening/);
     assert.match(description, /so it changes when a wall joined to that end moves it/);
-    assert.match(description, /null when the host is no straight wall, and for a door or window that is a panel of a curtain wall/);
+    assert.match(description, /null when the host is no straight wall, for a work-plane-based family, and for a door or window that is a panel of a curtain wall/);
     assert.match(description, /The box of a door or window includes the leaf or the sash/);
     assert.match(description, /so read its place from offsetAlongWallMm and not from boundingBoxMm/);
     assert.match(description, /sillHeightMm is the sill above the level in millimetres, null when the family has none/);
     assert.match(description, /the rough size for a bare opening, null when the type reads none/);
     assert.match(description, /read at the moment of this call, so a door placed before its rooms reads them here once they exist/);
     assert.match(description, /null where that side has no room, as outdoors/);
-    assert.match(description, /false when the host is no wall/);
+    assert.match(description, /fromRoomId and toRoomId name the rooms on the two sides of it/);
+    assert.match(description, /They say nothing of the way a door swings: for that read facingFlipped and handFlipped/);
+    assert.doesNotMatch(description, /leads? from and to/, "the two ids name the sides, and a flip does not swap them");
+    assert.match(description, /false when the host is no wall, and for a door or window that is a panel of a curtain wall/);
     assert.match(description, /A door or window type read by id, furniture and plumbing have none of these keys/);
   });
 
@@ -1496,8 +1502,11 @@ describe("MCP tools", { timeout: 20_000 }, () => {
 
     assert.match(description, /A floor, a ceiling and a roof also have areaM2, in square metres, null when Revit gives them none/);
     assert.match(description, /A floor's areaM2 is net of its openings and gross of the walls/);
+    assert.match(description, /whether they stand on it or pass through its edge/);
     assert.match(description, /a room's is net of them/);
+    assert.match(description, /A ceiling's is the area of its outline/);
     assert.match(description, /A roof's is measured along the slope, overhang included: a gable of footprint a x b at slope s reads ab \/ cos\(s\)/);
+    assert.match(description, /a and b are measured at the eaves, as create_roof adds overhangMm to the outline/);
     assert.match(description, /toposolid has no areaM2/);
   });
 
