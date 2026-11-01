@@ -59,6 +59,19 @@ Full history: the `Журнал решений` note in the vault. Open question
 - The Wall tool in the Revit UI makes two real undo steps, `Set up wall tool` and `Wall - Line`.
 - A wall's bounding box can keep an old height after a roof cuts it, so read `topMm`.
 - A dialog the guard refuses can make a Revit call return null instead of throwing, as `OpenAndActivateDocument` did on a locked file.
+- Revit sometimes refuses a posted Undo itself, with `API queue command ID_BUTTON_UNDO cannot be invoked in this context` in the journal. The cause is unknown. The model stays as it was, and the undo can be asked again.
+- `Activate` followed by `NewFamilyInstance` with no `Regenerate` can leave the first door or window not cutting its wall. Only `FindInserts` shows it.
+- `NewRoom` never fails. Area 0 is the only sign of a room that did not land.
+- A room separator takes its level from the view. Pass a floor plan of that level, and read neither `ActiveView` nor `View.SketchPlane`: a separator drawn from a 3D view once closed Revit.
+- Never answer `ProceedWithRollBack` at `scope.Commit` of `StairsEditScope`: it left a dialog and an edit mode only a person can end.
+- One `StairsEditScope` makes three commits and one real undo step. `Stairs.TopElevation` always reads the level, so read the last run.
+- Revit family names are case-sensitive: a path in another case loads a second family. A family reload undoes sizes written on catalog types.
+- Bare openings read Width and Height 0, and a written size changes nothing. Their cut is in the rough size parameters.
+- `Parameter.Set` stores an element id of the wrong kind with no word, so check the kind first.
+- A wall under a roof is lower than its top reads, so check an opening against the wall top at the opening itself.
+- `CompoundStructure.SetLayers` is a full reset that makes every layer core, and it throws an undocumented `InternalException` on a 0-thickness layer that is no membrane.
+- The `Realistic` view draws only the appearance asset, not the material's Shading colour.
+- `SaveAs` to a `.rte` moves the active document onto that file. `SaveAs` back to the `.rvt` with `OverwriteExistingFile` returns it.
 
 ## Environment
 
@@ -78,7 +91,7 @@ Run `dotnet` from the repository root and `npm` from `src/server`.
 - Unit tests: `dotnet test RevitMCP.sln` and `npm test`.
 - Deploy the plugin and restart Revit: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restart-revit.ps1`. It builds with `-p:DeployToRevit=true`, and it closes Revit only when `npm run revit:can-close` passes, so call `save_project` first. If it stops by timeout, a Revit dialog is probably waiting: do not retry, look at Revit.
 - Live tests: `npm run test:live`. They need a running Revit with the plugin loaded. Each file creates a new project in `%USERPROFILE%\Documents\RevitMCP`, leaves it open and saved, and `box.live.test.ts` keeps its snapshots in `task14-acceptance` there.
-- Reopen check: a live run prints `to check the reopen after a restart, set REVITMCP_REOPEN_NAME=<name>`. Restart Revit with the script, then run `$env:REVITMCP_REOPEN_NAME = '<name>'; npm run test:live` in PowerShell. Without that variable `reopens after a restart with the name intact` is skipped.
+- Reopen check: a live run prints `to check the reopen after a restart, set REVITMCP_REOPEN_NAME=<name>`. Restart Revit with the script, then run `$env:REVITMCP_REOPEN_NAME = '<name>'; npm run test:live` in PowerShell. Without that variable `reopens after a restart with the name intact` is skipped. `REVITMCP_TEMPLATE_NAME` does the same for a template, and a live run prints its value too.
 
 ## Subagents
 

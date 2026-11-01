@@ -12,19 +12,35 @@ tools:
   - mcp__revit__get_request_status
   - mcp__revit__get_model_info
   - mcp__revit__list_types
+  - mcp__revit__list_materials
   - mcp__revit__get_elements
+  - mcp__revit__get_warnings
   - mcp__revit__get_view_snapshot
   - mcp__revit__get_last_undo_result
   - mcp__revit__cancel_request
   - mcp__revit__create_project
   - mcp__revit__open_project
   - mcp__revit__save_project
+  - mcp__revit__save_project_template
+  - mcp__revit__create_materials
+  - mcp__revit__create_type
   - mcp__revit__create_levels
   - mcp__revit__create_walls
   - mcp__revit__create_floors
   - mcp__revit__create_roof
+  - mcp__revit__create_ceilings
+  - mcp__revit__create_floor_openings
+  - mcp__revit__create_ground
+  - mcp__revit__load_family
+  - mcp__revit__place_instances
+  - mcp__revit__place_hosted
+  - mcp__revit__create_stairs
+  - mcp__revit__create_railings
+  - mcp__revit__create_rooms
+  - mcp__revit__create_room_separators
   - mcp__revit__attach_walls
   - mcp__revit__create_3d_view
+  - mcp__revit__update_elements
   - mcp__revit__delete_elements
   - mcp__revit__undo_last_operation
 ---

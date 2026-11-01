@@ -11,7 +11,9 @@ tools:
   - mcp__revit__get_request_status
   - mcp__revit__get_model_info
   - mcp__revit__list_types
+  - mcp__revit__list_materials
   - mcp__revit__get_elements
+  - mcp__revit__get_warnings
   - mcp__revit__get_view_snapshot
   - mcp__revit__get_last_undo_result
 ---
@@ -24,7 +26,7 @@ You compare the model with the plan and find what is wrong. You change nothing. 
 
 - Geometry: levels, wall lengths, closed corners, walls reaching floors and roof.
 - Rooms: every room exists, is enclosed, and matches its planned area.
-- Openings: doors and windows are hosted, sized and positioned as planned.
+- Openings: doors and windows are hosted, sized and positioned as planned. A door at the exact end of a wall at a joined corner sits partly in the crossing wall, and Revit accepts it, so check door positions against the corners.
 - Stairs: they connect both levels, have a floor opening and railings, and leave headroom.
 - Roof: it covers the building with the planned slope and overhang.
 - Livability: every room is reachable, nothing blocks a door, furniture fits.
