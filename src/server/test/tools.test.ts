@@ -277,6 +277,15 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.deepEqual(JSON.parse(textOf(result)), types);
   });
 
+  it("says that list_types with stairs lists only the types create_stairs takes", async (t) => {
+    const { client } = await connect(t, () => {});
+
+    const { tools: listed } = await client.listTools();
+    const description = listed.find((tool) => tool.name === "list_types")?.description ?? "";
+
+    assert.match(description, /stairs lists only the types create_stairs takes/);
+  });
+
   it("passes the toposolid category of list_types and get_elements to Revit", async (t) => {
     const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, []));
 

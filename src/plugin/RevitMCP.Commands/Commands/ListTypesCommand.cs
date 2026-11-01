@@ -8,7 +8,8 @@ namespace RevitMCP.Commands;
 /// <summary>
 /// Lists the types of one category of the active document as <c>[{ id, family, name }]</c>, or its 3D view templates in
 /// the same shape with an empty <c>family</c>. The names are Revit's own text. The sort uses the ordinal order, so it
-/// does not depend on the culture of the machine.
+/// does not depend on the culture of the machine. The stairs category lists <c>StairsType</c> only, the types
+/// <c>create_stairs</c> takes, and leaves out the component <c>Stair</c> families that share the category.
 /// </summary>
 public sealed class ListTypesCommand : ICommand
 {
@@ -41,6 +42,7 @@ public sealed class ListTypesCommand : ICommand
                 .OfCategory(found)
                 .WhereElementIsElementType()
                 .Cast<ElementType>()
+                .Where(type => found != BuiltInCategory.OST_Stairs || type is Autodesk.Revit.DB.Architecture.StairsType)
                 .OrderBy(type => type.FamilyName, StringComparer.Ordinal)
                 .ThenBy(type => type.Name, StringComparer.Ordinal)
                 .ThenBy(type => type.Id.Value)

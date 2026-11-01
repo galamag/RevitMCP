@@ -227,7 +227,7 @@ export const tools: readonly ToolDefinition[] = [
       "[{ id, family, name }] sorted by family, then name, then id, so the order holds between calls. ids are " +
       "strings: pass them back unchanged. family and name are Revit's own text, usually Russian: read them to choose " +
       "a type, and never guess or translate one. An empty list means that no type of this category is loaded in the " +
-      "project, not that the category is unknown. toposolid lists the types of ground for create_ground. rooms has no types, so its list is always empty: read rooms with get_elements. view_templates is not a category of elements: it lists the 3D view " +
+      "project, not that the category is unknown. toposolid lists the types of ground for create_ground. stairs lists only the types create_stairs takes, so any row of it is a valid typeId there. rooms has no types, so its list is always empty: read rooms with get_elements. view_templates is not a category of elements: it lists the 3D view " +
       "templates for viewTemplateId of create_3d_view, in the same shape, with family as an empty string. " +
       "Related tools: get_elements, get_model_info, create_3d_view.",
     inputSchema: {
