@@ -20,7 +20,7 @@ You decide how the building looks. Read `designs/<project-slug>/plan.md` and `ca
 
 - Style in one short paragraph, so every choice points the same way.
 - Exterior and interior materials per element.
-- Door and window families, from the real library at `C:\ProgramData\Autodesk\RVT 2027\Libraries\Russian\Russia`. Use exact file paths and check each file exists.
+- Door and window families, from the real library at `C:\ProgramData\Autodesk\RVT 2027\Libraries\Russian\Russia`. Write each path as `load_family` takes it, relative to `C:\ProgramData\Autodesk\RVT 2027\Libraries\Russian` and starting with `Russia\`, and check each file exists.
 - Furniture per room, from the same library.
 - 3D views: camera position, target, and purpose of each view.
 

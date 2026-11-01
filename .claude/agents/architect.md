@@ -39,6 +39,19 @@ The developer has never used Revit and approves the design from the drawing, so 
 - Roof: an outline on wall centre lines with no overhang leaves the outer wall layers below the roof at gable ends. Give an overhang wider than half the wall thickness, or put the outline on the outer wall faces. With an overhang, eaves end below the roof's level.
 - This is a demonstration model, not an engineering design. Never claim structural safety.
 
+## What the builder can make
+
+The builder has only these tools, and a plan that needs more stops the build after the developer approved it.
+
+- Walls are straight, with no curves.
+- A floor, ceiling, roof or ground area is one outline of straight edges, with no holes.
+- A hole in a floor is a separate floor opening. A ceiling takes no opening, so clear a stairwell with a notch in the ceiling outline, and place stairs against a wall so the notch can reach them.
+- Stairs are one straight run, or two runs with a landing between them, as U-shaped stairs or with a corner. No winders.
+- A roof is a footprint with a slope, or none, on each edge, and one overhang for all edges.
+- A room separator must run from the axis of one wall to the axis of another, or it divides nothing.
+- Doors and windows stand in straight walls. Keep a door away from the exact end of a wall: at a joined corner it would sit partly in the crossing wall.
+- A window under a sloped roof must fit below the wall top at that window, which is lower than at the ridge.
+
 ## Report
 
 Return the plan path, the area totals, and every assumption the developer should confirm.
