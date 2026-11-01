@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { describe, it } from "node:test";
+import { describe, it, type TestContext } from "node:test";
 
 import { checkCanClose } from "../../src/cli/closeRule.ts";
 import { BridgeClient } from "../../src/client.ts";
 import { defaultConnectionPath } from "../../src/connection.ts";
 import { BridgeRpcError } from "../../src/errors.ts";
 import { UndoNotConfirmedError, undoLastOperation, type UndoResult } from "../../src/undo.ts";
-import { decodePng, reportColours, type Band, type Pixels, type Region } from "../pngPixels.ts";
+import { decodePng, meanColour, reportColours, type Band, type Pixels, type Region } from "../pngPixels.ts";
 
 // These tests need a running Revit with the RevitMCP plugin loaded. Each run creates one new project in the test folder
 // and leaves it open and saved. Colour is judged on snapshots, two ways: the pixels are read here, so a machine decides,
@@ -53,6 +53,7 @@ interface MaterialActual {
   colorRgb: Rgb | null;
   appearanceColorRgb: Rgb | null;
   transparency: number;
+  appearanceTransparency: number | null;
   appearanceAssetId: string | null;
   useRenderAppearanceForShading: boolean;
 }
@@ -144,6 +145,8 @@ const SLOTS: Readonly<Record<"left" | "middle" | "right", Region>> = {
 
 /** A region counts as showing a colour when almost all of its coloured pixels are of that band, and almost all of it is coloured. */
 const MIN_BAND_SHARE = 0.95;
+/** Realistic and Shading must differ at least this much in a channel on a wall of one colour. Measured: 33. */
+const MIN_STYLE_DIFFERENCE = 10;
 const MIN_COLOURED_SHARE = 0.9;
 
 const stamp = new Date().toTimeString().slice(0, 8).replaceAll(":", "");
@@ -232,11 +235,14 @@ async function isModified(client: BridgeClient): Promise<boolean> {
 }
 
 /**
- * Undoes the last operation. Live Revit now and then does not run a posted Undo at all, and the tool then says that it
- * was not undone and the model is as it was. That happened for create_walls as well, so it is no matter of these tools:
- * the undo is posted once more after the minute the tool asks for, and the test says so.
+ * Undoes the last operation. Revit itself now and then refuses the Undo that was posted to it: its journal says `API queue
+ * command ID_BUTTON_UNDO cannot be invoked in this context`, and the tool answers `Not undone`, with the model as it was.
+ * It came in windows of time and for every tool tried (create_walls, create_type, create_materials), also in the stage 2
+ * undo tests, and the cause is not known. So this posts the undo once more after the minute the tool asks for. Before it
+ * does, it asks what became of the first post, as an undo that ran late must not be posted again. The retry is written to
+ * the result of the test.
  */
-async function undoWithOneRetry(client: BridgeClient): Promise<UndoResult> {
+async function undoWithOneRetry(t: TestContext, client: BridgeClient): Promise<UndoResult> {
   try {
     return await undoLastOperation(client);
   } catch (error) {
@@ -244,8 +250,15 @@ async function undoWithOneRetry(client: BridgeClient): Promise<UndoResult> {
       throw error;
     }
 
-    console.log(`# Revit did not run the posted undo (${error.message.slice(0, 80)}), so it is posted again after a minute`);
     await new Promise((resolve) => setTimeout(resolve, UNDO_SETTLE_MS));
+    const first = (await client.call("get_last_undo_result", {})) as UndoResult;
+    t.diagnostic(`Revit did not run the posted undo of ${String(first.transactionName)}; a minute later get_last_undo_result says ${first.state}, so ${first.state === "undone" ? "it is not posted again" : "it is posted again"}`);
+
+    if (first.state === "undone") {
+      return first;
+    }
+    assert.equal(first.state, "not_confirmed", `an undo that is neither confirmed nor undone must not be posted again: ${JSON.stringify(first)}`);
+
     return undoLastOperation(client);
   }
 }
@@ -409,6 +422,26 @@ describe("stage 3 live checks: materials and types", { timeout: 900_000 }, () =>
       const shading = await photographRow(client, typeIds, "shading", "цвета");
       for (const [slot, entry] of (["left", "middle", "right"] as const).map((slot, index) => [slot, wanted[index]!] as const)) {
         assertShows(shading, slot, entry.band, `Shading, ${entry.name}`);
+      }
+
+      // The two display styles draw by different ways, the asset in Realistic and the colour of the material in Shading:
+      // the same red wall comes out as 255 in Realistic and about 222 in Shading, lit by the default sun. Measured the same in six runs.
+      const inRealistic = meanColour(realistic, SLOTS.left);
+      const inShading = meanColour(shading, SLOTS.left);
+      console.log(`# the red wall, mean colour in Realistic ${JSON.stringify(inRealistic)}, in Shading ${JSON.stringify(inShading)}`);
+      assert.ok(inRealistic.r - inShading.r >= MIN_STYLE_DIFFERENCE, `Realistic and Shading should not draw the red wall alike: ${inRealistic.r} against ${inShading.r}`);
+
+      // A control: between the red and the blue wall stands a wall of a grey template material, which shows no colour, in both styles.
+      const [grey] = created(
+        await types(client, [{ category: "walls", baseTypeId: w.wall.id, name: `Стена серая ${stamp}`, layers: [{ thicknessMm: 200, materialId: w.concrete.id, function: "structure" }] }]),
+      );
+      assert.ok(grey);
+      const withGrey = [typeIds[0]!, grey.id, typeIds[2]!];
+      for (const style of ["realistic", "shading"] as const) {
+        const picture = await photographRow(client, withGrey, style, "контроль");
+        assertShows(picture, "left", "red", `${style} control, the red wall`);
+        assertShows(picture, "middle", null, `${style} control, the grey template material`);
+        assertShows(picture, "right", "blue", `${style} control, the blue wall`);
       }
     });
   });
@@ -742,6 +775,7 @@ describe("stage 3 live checks: materials and types", { timeout: 900_000 }, () =>
         ["a name with a space at the start", { ...good, name: " Пробел" }, /cannot be a material name/],
         ["a colour on a brick base", { name: `Кирпич зелёный ${stamp}`, baseMaterialId: w.brick.id, colorRgb: GREEN }, /no plain colour to set/],
         ["a transparency on a glass base", { name: `Стекло мутное ${stamp}`, baseMaterialId: w.glass.id, transparency: 50 }, /no transparency to set/],
+        ["a transparency of 0 on a glass base", { name: `Стекло плотное ${stamp}`, baseMaterialId: w.glass.id, transparency: 0 }, /no transparency to set, so its copy could not be given a transparency in Realistic, not even 0/],
       ];
 
       for (const [what, item, message] of requests) {
@@ -789,6 +823,96 @@ describe("stage 3 live checks: materials and types", { timeout: 900_000 }, () =>
     });
   });
 
+  it("transparency is set on the material and in its appearance, and left out it is 0 for a new material and the base's for a copy", async () => {
+    await withClient(async (client) => {
+      const baseName = `Тонированное ${stamp}`;
+      const colour: Rgb = { r: 40, g: 120, b: 200 };
+
+      // Given, on a new material: the transparency of Shading and the one of the appearance are both read back from the model.
+      const [base] = created(await materials(client, [{ name: baseName, colorRgb: colour, transparency: 60 }]));
+      assert.ok(base);
+      console.log(`# transparency 60: ${JSON.stringify(base.actual)}`);
+      assert.equal(base.actual.transparency, 60);
+      assertNear(base.actual.appearanceTransparency, 60, "transparency of the appearance");
+      assert.deepEqual(base.actual.colorRgb, colour);
+      assert.deepEqual(base.actual.appearanceColorRgb, colour);
+      assert.equal((await listMaterials(client)).find((row) => row.id === base.id)?.transparency, 60);
+
+      // Left out, on a new material: opaque in both.
+      const [plain] = created(await materials(client, [{ name: `Непрозрачное ${stamp}`, colorRgb: colour }]));
+      assert.equal(plain?.actual.transparency, 0);
+      assertNear(plain?.actual.appearanceTransparency, 0, "transparency of the appearance of a new material");
+
+      // Left out, on a copy: the copy is as see-through as its base, in Shading and in Realistic, with an asset of its own.
+      // Given, on a copy, 25 and 0: it is set, in both. A colour alone leaves the transparency as it is.
+      const copies = created(
+        await materials(client, [
+          { name: `Тонированное копия ${stamp}`, baseMaterialId: base.id },
+          { name: `Тонированное копия 25 ${stamp}`, baseMaterialId: base.id, transparency: 25 },
+          { name: `Тонированное копия 0 ${stamp}`, baseMaterialId: base.id, transparency: 0 },
+          { name: `Тонированное копия цвет ${stamp}`, baseMaterialId: base.id, colorRgb: RED },
+        ]),
+      );
+      const [kept, quarter, zero, recoloured] = copies;
+      assert.ok(kept && quarter && zero && recoloured);
+      console.log(`# copies of the transparency 60: ${JSON.stringify(copies.map((copy) => [copy.actual.transparency, copy.actual.appearanceTransparency]))}`);
+      assert.equal(kept.actual.transparency, 60);
+      assertNear(kept.actual.appearanceTransparency, 60, "the copy keeps the transparency of the appearance");
+      assert.deepEqual(kept.actual.colorRgb, colour);
+      assert.equal(quarter.actual.transparency, 25);
+      assertNear(quarter.actual.appearanceTransparency, 25, "a transparency of 25 on a copy");
+      assert.equal(zero.actual.transparency, 0);
+      assertNear(zero.actual.appearanceTransparency, 0, "a transparency of 0 on a copy");
+      assert.equal(recoloured.actual.transparency, 60, "a colour on a copy leaves its transparency alone");
+      assertNear(recoloured.actual.appearanceTransparency, 60, "a colour on a copy leaves the transparency of its appearance alone");
+      assert.deepEqual(recoloured.actual.appearanceColorRgb, RED);
+      assert.equal(new Set([base, ...copies].map((copy) => copy.actual.appearanceAssetId)).size, 5, "each has an appearance asset of its own");
+
+      // The base did not move, and a transparency that is left out is not compared with the one the material has.
+      const again = (await materials(client, [{ name: baseName, colorRgb: colour }])).items[0];
+      assert.equal(again?.status, "already_existed");
+      assert.deepEqual(again?.warnings, [], "no transparency was given, so none is compared");
+      assert.equal(again?.actual?.transparency, 60);
+      assertNear(again?.actual?.appearanceTransparency, 60, "the appearance of the base");
+      const asked = (await materials(client, [{ name: baseName, colorRgb: colour, transparency: 0 }])).items[0];
+      assert.equal(asked?.warnings.length, 1, JSON.stringify(asked?.warnings));
+      assert.match(asked?.warnings[0] ?? "", /transparency 60, not the 0 asked for/);
+      assert.equal(asked?.actual?.transparency, 60, "an existing material is not changed");
+    });
+  });
+
+  it("a copy of the template glass keeps its transparency and has an asset of its own, and glass takes none of its own", async () => {
+    await withClient(async (client) => {
+      const w = ready();
+      const glassBefore = materialNamed(await listMaterials(client), w.glass.name);
+      assert.ok(glassBefore.transparency > 0, "the glass of the template is see-through");
+
+      const baseRead = (await materials(client, [{ name: w.glass.name, baseMaterialId: w.glass.id }])).items[0];
+      assert.equal(baseRead?.status, "already_existed");
+      assert.deepEqual(baseRead?.warnings, [], "no transparency was given, so none is compared");
+      assert.equal(baseRead?.actual?.transparency, glassBefore.transparency);
+      assert.equal(baseRead?.actual?.appearanceTransparency, null, "the glazing appearance has no transparency to read");
+
+      const [copy] = created(await materials(client, [{ name: `Стекло копия ${stamp}`, baseMaterialId: w.glass.id }]));
+      assert.ok(copy);
+      console.log(`# glass copy: ${JSON.stringify(copy.actual)}`);
+      assert.equal(copy.actual.transparency, glassBefore.transparency, "a name-only copy keeps the transparency of its base");
+      assert.deepEqual(copy.actual.colorRgb, glassBefore.color);
+      assert.equal(copy.actual.appearanceTransparency, null);
+      assert.ok(copy.actual.appearanceAssetId);
+      assert.notEqual(copy.actual.appearanceAssetId, baseRead?.actual?.appearanceAssetId, "the copy has an asset of its own");
+      assert.equal(copy.actual.materialClass, glassBefore.materialClass);
+      assert.equal((await listMaterials(client)).find((row) => row.id === copy.id)?.transparency, glassBefore.transparency);
+      assert.deepEqual(materialNamed(await listMaterials(client), w.glass.name), glassBefore, "the glass of the template did not move");
+
+      // A transparency, 0 included, is refused for the glass, as its appearance has none to set.
+      for (const transparency of [0, 50]) {
+        const refused = await refusal(client, "create_materials", { items: [{ name: `Стекло ${transparency} ${stamp}`, baseMaterialId: w.glass.id, transparency }] });
+        assert.match(refused.message, /no transparency to set/);
+      }
+    });
+  });
+
   it("basic type name with Cyrillic", async () => {
     await withClient(async (client) => {
       const w = ready();
@@ -831,7 +955,7 @@ describe("stage 3 live checks: materials and types", { timeout: 900_000 }, () =>
     });
   });
 
-  it("one call is one Undo step, for materials with their assets and for types", async () => {
+  it("one call is one Undo step, for materials with their assets and for types", async (t) => {
     await withClient(async (client) => {
       const w = ready();
       const typeName = `Тип под отмену ${stamp}`;
@@ -844,18 +968,20 @@ describe("stage 3 live checks: materials and types", { timeout: 900_000 }, () =>
       assert.equal((await listMaterials(client)).length, before.length + 2);
 
       // One undo takes both materials, with the assets they made, and nothing before them.
-      const undone = await undoWithOneRetry(client);
+      const undone = await undoWithOneRetry(t, client);
       console.log(`# undo of create_materials: ${JSON.stringify(undone)}`);
       assert.equal(undone.state, "undone", JSON.stringify(undone));
       assert.equal(undone.transactionName, "MCP: create_materials");
       for (const entry of made) {
         assert.ok(undone.createdIds.includes(entry.id), `${entry.id} should be among the created ids of the undo`);
+        assert.ok(entry.actual.appearanceAssetId, `the material ${entry.id} has an appearance asset`);
+        assert.ok(undone.createdIds.includes(entry.actual.appearanceAssetId), `the asset ${entry.actual.appearanceAssetId} of ${entry.id} should be among the created ids of the undo`);
       }
       assert.deepEqual(await listMaterials(client), before);
       assert.ok((await listTypes(client, "walls")).some((row) => row.id === type.id), "the type made before the materials is still there");
 
       // The next undo is the type's own step.
-      const second = await undoWithOneRetry(client);
+      const second = await undoWithOneRetry(t, client);
       assert.equal(second.transactionName, "MCP: create_type");
       assert.ok(second.createdIds.includes(type.id));
       assert.equal((await listTypes(client, "walls")).some((row) => row.id === type.id), false);

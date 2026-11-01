@@ -200,3 +200,25 @@ export function reportColours(pixels: Pixels, region: Region = { left: 0, top: 0
 
   return { pixels: total, coloured, bands, dominant };
 }
+
+/** The mean colour of a region, each channel from 0 to 255, so that two pictures of one scene can be told apart by what they draw. */
+export function meanColour(pixels: Pixels, region: Region = { left: 0, top: 0, right: 1, bottom: 1 }): { r: number; g: number; b: number } {
+  if (pixels.channels < 3) {
+    throw new Error("a grey picture has no colour to average");
+  }
+
+  const sums = [0, 0, 0];
+  let count = 0;
+
+  for (let y = Math.floor(region.top * pixels.height); y < Math.ceil(region.bottom * pixels.height); y++) {
+    for (let x = Math.floor(region.left * pixels.width); x < Math.ceil(region.right * pixels.width); x++) {
+      const at = (y * pixels.width + x) * pixels.channels;
+      sums[0]! += pixels.data[at]!;
+      sums[1]! += pixels.data[at + 1]!;
+      sums[2]! += pixels.data[at + 2]!;
+      count++;
+    }
+  }
+
+  return { r: sums[0]! / count, g: sums[1]! / count, b: sums[2]! / count };
+}

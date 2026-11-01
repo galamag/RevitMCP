@@ -315,15 +315,17 @@ export const tools: readonly ToolDefinition[] = [
       "Without colorRgb the copy keeps the colour of its base. A colour can only be set on an appearance that has a plain colour: " +
       "a base such as brick or wood has none, and a call that asks for a colour or a transparency on such a base is refused before anything changes, never done half way. " +
       "A base with no appearance at all is refused in the same way when a colour or a transparency is asked of it. " +
-      "transparency is a whole number from 0, opaque, to 100, fully see-through, and 0 when left out. It is applied to every material the tool makes, a copy of a see-through base included, so pass the transparency you want. " +
+      "transparency is a whole number from 0, opaque, to 100, fully see-through. Left out, it is 0 for a new material, and a copy keeps the transparency of its base, in Shading and in Realistic, as the base has it. " +
+      "Given, 0 included, it is set both on the material and in its appearance, and a base whose appearance has no transparency to set, such as the glass of the template, refuses any value, 0 too, before anything changes: then leave transparency out. " +
       "In Realistic a see-through material shows what lies behind it and loses its tint, so judge the colour of a see-through material with transparency 0. " +
       "A new material, made without baseMaterialId, has the material class Unassigned, and a copy keeps the class of its base. " +
       "A name that already exists, matched exactly, gives status already_existed with that material's id in elementId, and the material is left as it is. " +
-      "actual then shows what it really is, so read it: when its colour in Shading or in Realistic, or its transparency, differs from the request, the item carries a warning and nothing was changed. " +
+      "actual then shows what it really is, so read it: when the colour you gave, in Shading or in Realistic, or the transparency you gave, differs from it, the item carries a warning and nothing was changed. A colour or a transparency you left out is not compared. " +
       "When every item already exists, nothing changes and no Undo step is added. already_existed still stands when the batch fails. " +
       "The same name twice in one list is refused. A name that differs from an existing one only in case is another name, as Revit takes it. " +
-      "actual is { name, materialClass, colorRgb, appearanceColorRgb, transparency, appearanceAssetId, useRenderAppearanceForShading }: " +
+      "actual is { name, materialClass, colorRgb, appearanceColorRgb, transparency, appearanceTransparency, appearanceAssetId, useRenderAppearanceForShading }: " +
       "colorRgb is the colour of Shading and appearanceColorRgb the colour of Realistic, each { r, g, b } or null, and appearanceColorRgb is null for an appearance that has no single colour, such as one with a texture. " +
+      "transparency is that of Shading and appearanceTransparency that of Realistic, both from 0 to 100, and appearanceTransparency is null for an appearance that has no transparency, such as the glass of the template. " +
       "Use the material in create_type, as the materialId of a layer. " +
       BATCH_RULES +
       " Related tools: list_materials, create_type, get_view_snapshot, save_project.",
@@ -341,7 +343,13 @@ export const tools: readonly ToolDefinition[] = [
               })
               .optional()
               .describe(`The colour as { r, g, b }, each a whole number from 0 to ${MAX_COLOR_CHANNEL}. Required without baseMaterialId.`),
-            transparency: z.number().int().min(0).max(MAX_TRANSPARENCY).default(0).describe(`How see-through the material is, a whole number from 0, opaque, to ${MAX_TRANSPARENCY}.`),
+            transparency: z
+              .number()
+              .int()
+              .min(0)
+              .max(MAX_TRANSPARENCY)
+              .optional()
+              .describe(`How see-through the material is, a whole number from 0, opaque, to ${MAX_TRANSPARENCY}. Left out: 0 for a new material, and that of the base for a copy.`),
           })
           .refine((item) => item.baseMaterialId !== undefined || item.colorRgb !== undefined, {
             message: "Give colorRgb, or baseMaterialId to take the colour of a material that exists.",

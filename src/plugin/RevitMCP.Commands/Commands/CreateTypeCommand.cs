@@ -7,8 +7,10 @@ namespace RevitMCP.Commands;
 
 /// <summary>
 /// Creates wall, floor, ceiling and roof types as one transaction: a copy of a base type, with the layers asked for when
-/// there are any. The layers go into a copy of the structure of the base, so what the base says besides its layers is
-/// kept. An existing type is never changed: its name, matched exactly among the types of the same class, gives
+/// there are any. The layers go through <c>CompoundStructure.SetLayers</c>, which resets the structure completely
+/// (RevitAPI.xml): every layer becomes a core layer, so the new type has no shell layers, and it has no structural material
+/// and no variable layer. What else the structure of the base held is not relied on. An existing type is never changed: its
+/// name, matched exactly among the types of the same class and family as the base type, gives
 /// <see cref="ItemStatus.AlreadyExisted"/> and what it really is, with a warning where that is not what the caller asked for.
 /// </summary>
 public sealed class CreateTypeCommand : ICommand
@@ -175,11 +177,6 @@ public sealed class CreateTypeCommand : ICommand
     private static ItemResult ReportExisting(HostObjAttributes type, TypeInput input, int index, JsonElement requested)
     {
         var warnings = new List<string>();
-
-        if (type.FamilyName != input.Base.FamilyName)
-        {
-            warnings.Add($"Type '{type.Name}' belongs to the family '{type.FamilyName}', and the base type to '{input.Base.FamilyName}'. It was not changed.");
-        }
 
         var expected = input.Layers?.ConvertAll(layer => layer.ToLayer()) ?? input.Base.GetCompoundStructure()?.GetLayers().ToList();
         var actual = type.GetCompoundStructure()?.GetLayers().ToList();

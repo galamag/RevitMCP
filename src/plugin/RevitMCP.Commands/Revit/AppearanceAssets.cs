@@ -16,6 +16,9 @@ internal static class AppearanceAssets
 
     private const int MaxChannel = 255;
 
+    /// <summary>Transparency in the contract runs from 0, opaque, to this. The asset takes it as a fraction of 1.</summary>
+    public const int MaxTransparency = 100;
+
     /// <summary>
     /// The first plain generic asset by ID, which is one whose colour is a colour and not a texture, and which has a
     /// transparency to set. Null when the project holds none.
@@ -58,6 +61,23 @@ internal static class AppearanceAssets
         var channels = diffuse.GetValueAsDoubles();
 
         return (Channel(channels[0]), Channel(channels[1]), Channel(channels[2]));
+    }
+
+    /// <summary>
+    /// The transparency the Realistic style takes from the appearance of this material, from 0 to
+    /// <see cref="MaxTransparency"/> like <c>Material.Transparency</c>. Null when the asset has no <c>generic_transparency</c>,
+    /// and then Realistic is not told how see-through the material is.
+    /// </summary>
+    public static double? RealisticTransparency(Document document, Material material)
+    {
+        if (document.GetElement(material.AppearanceAssetId) is not AppearanceAssetElement element
+            || Rendering(element) is not { } asset
+            || TransparencyOf(asset) is not { } transparency)
+        {
+            return null;
+        }
+
+        return Math.Round(transparency.Value * MaxTransparency, 4);
     }
 
     /// <summary>The Shading colour of a material, or null when Revit holds no valid one.</summary>

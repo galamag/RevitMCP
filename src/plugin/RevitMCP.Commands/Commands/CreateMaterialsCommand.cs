@@ -10,14 +10,13 @@ namespace RevitMCP.Commands;
 /// Creates materials as one transaction, with a colour that shows in Realistic as well as in Shading. A new material gets
 /// a copy of a plain generic appearance asset, see <see cref="AppearanceAssets"/>. A material made from a base is
 /// duplicated together with a copy of its asset, as a duplicate shares the asset of its base, and a colour set on that
-/// would recolour the base too. An existing material is never changed: its name, matched exactly, gives
-/// <see cref="ItemStatus.AlreadyExisted"/> and what it really is, with a warning where that is not what the caller asked for.
+/// would recolour the base too. A transparency not given is 0 for a new material and the transparency of the base for a
+/// copy. An existing material is never changed: its name, matched exactly, gives <see cref="ItemStatus.AlreadyExisted"/>
+/// and what it really is, with a warning where that is not what the caller asked for, and only for what was asked.
 /// </summary>
 public sealed class CreateMaterialsCommand : ICommand
 {
     private const int MaxChannel = 255;
-
-    private const int MaxTransparency = 100;
 
     public string Method => MethodNames.CreateMaterials;
 
@@ -51,13 +50,21 @@ public sealed class CreateMaterialsCommand : ICommand
             material.Color = new Color((byte)colour.R, (byte)colour.G, (byte)colour.B);
         }
 
-        material.Transparency = input.Transparency;
+        if (input.ToWrite is { } transparency)
+        {
+            material.Transparency = transparency;
+        }
 
         if (input.AssetSource is { } source)
         {
             var copy = source.Duplicate(input.AssetName!);
             material.AppearanceAssetId = copy.Id;
-            EditAsset(document, copy.Id, input);
+
+            // A copy that is neither recoloured nor given a transparency is the asset of its base, as it is.
+            if (input.Colour is not null || input.ToWrite is not null)
+            {
+                EditAsset(document, copy.Id, input);
+            }
         }
 
         return material;
@@ -85,9 +92,12 @@ public sealed class CreateMaterialsCommand : ICommand
                 diffuse.SetValueAsColor(new Color((byte)colour.R, (byte)colour.G, (byte)colour.B));
             }
 
-            if (AppearanceAssets.TransparencyOf(asset) is { } transparency)
+            if (input.ToWrite is { } percent)
             {
-                transparency.Value = input.Transparency / (double)MaxTransparency;
+                var transparency = AppearanceAssets.TransparencyOf(asset)
+                    ?? throw new InvalidOperationException("The copy of the appearance asset has no transparency to set.");
+
+                transparency.Value = percent / (double)AppearanceAssets.MaxTransparency;
             }
 
             scope.Commit(true);
@@ -113,9 +123,9 @@ public sealed class CreateMaterialsCommand : ICommand
         var name = reader.Name("name", "a material");
         var baseMaterial = reader.Has("baseMaterialId") ? reader.Material(document, "baseMaterialId") : null;
         (int R, int G, int B)? colour = reader.Has("colorRgb") ? ReadColour(reader) : null;
-        var transparency = reader.Has("transparency")
-            ? reader.WholeNumber("transparency", item.GetProperty("transparency"), 0, MaxTransparency)
-            : 0;
+        int? transparency = reader.Has("transparency")
+            ? reader.WholeNumber("transparency", item.GetProperty("transparency"), 0, AppearanceAssets.MaxTransparency)
+            : null;
 
         if (colour is null && baseMaterial is null)
         {
@@ -151,7 +161,7 @@ public sealed class CreateMaterialsCommand : ICommand
         Lazy<AppearanceAssetElement?> plain,
         Material? baseMaterial,
         (int R, int G, int B)? colour,
-        int transparency)
+        int? transparency)
     {
         if (baseMaterial is null)
         {
@@ -161,7 +171,7 @@ public sealed class CreateMaterialsCommand : ICommand
 
         if (document.GetElement(baseMaterial.AppearanceAssetId) is not AppearanceAssetElement baseAsset)
         {
-            return colour is null && transparency == 0
+            return colour is null && transparency is null
                 ? null
                 : throw reader.Refuse(
                     $"baseMaterialId {baseMaterial.Id} ('{baseMaterial.Name}') has no appearance asset, so a colour or transparency on its copy would not show in Realistic. Leave baseMaterialId out and give colorRgb.");
@@ -176,11 +186,11 @@ public sealed class CreateMaterialsCommand : ICommand
                 + "Leave colorRgb out to copy it as it is, or leave baseMaterialId out and give colorRgb.");
         }
 
-        if (transparency > 0 && (rendering is null || AppearanceAssets.TransparencyOf(rendering) is null))
+        if (transparency is not null && (rendering is null || AppearanceAssets.TransparencyOf(rendering) is null))
         {
             throw reader.Refuse(
-                $"baseMaterialId {baseMaterial.Id} ('{baseMaterial.Name}') has an appearance with no transparency to set, so its copy would not be see-through in Realistic. "
-                + "Leave transparency out, or leave baseMaterialId out.");
+                $"baseMaterialId {baseMaterial.Id} ('{baseMaterial.Name}') has an appearance with no transparency to set, so its copy could not be given a transparency in Realistic, not even 0. "
+                + "Leave transparency out to keep the transparency of the base, or leave baseMaterialId out and give colorRgb.");
         }
 
         return baseAsset;
@@ -223,9 +233,9 @@ public sealed class CreateMaterialsCommand : ICommand
             }
         }
 
-        if (material.Transparency != input.Transparency)
+        if (input.Transparency is { } asked && material.Transparency != asked)
         {
-            warnings.Add($"Material '{material.Name}' has transparency {material.Transparency}, not the {input.Transparency} asked for. It was not changed.");
+            warnings.Add($"Material '{material.Name}' has transparency {material.Transparency}, not the {asked} asked for. It was not changed.");
         }
 
         return new ItemResult(
@@ -260,6 +270,7 @@ public sealed class CreateMaterialsCommand : ICommand
         colorRgb = AppearanceAssets.Json(AppearanceAssets.ShadingColour(material)),
         appearanceColorRgb = AppearanceAssets.Json(AppearanceAssets.RealisticColour(document, material)),
         transparency = material.Transparency,
+        appearanceTransparency = AppearanceAssets.RealisticTransparency(document, material),
         appearanceAssetId = material.AppearanceAssetId == ElementId.InvalidElementId ? null : material.AppearanceAssetId.ToString(),
         useRenderAppearanceForShading = material.UseRenderAppearanceForShading,
     };
@@ -268,7 +279,14 @@ public sealed class CreateMaterialsCommand : ICommand
         string Name,
         Material? Base,
         (int R, int G, int B)? Colour,
-        int Transparency,
+        int? Transparency,
         AppearanceAssetElement? AssetSource,
-        string? AssetName);
+        string? AssetName)
+    {
+        /// <summary>
+        /// The transparency to write: the one given, 0 for a new material, and none for a copy, which keeps that of its base,
+        /// both on the material and in its asset.
+        /// </summary>
+        public int? ToWrite => Transparency ?? (Base is null ? 0 : (int?)null);
+    }
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { crc32, deflateSync } from "node:zlib";
 
-import { bandOf, decodePng, hsv, reportColours, type Pixels } from "./pngPixels.ts";
+import { bandOf, decodePng, hsv, meanColour, reportColours, type Pixels } from "./pngPixels.ts";
 
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -110,5 +110,14 @@ describe("PNG reader for tests", () => {
     const grey = reportColours(pixels, { left: 0.9, top: 0, right: 1, bottom: 1 });
     assert.equal(grey.coloured, 0);
     assert.equal(grey.dominant, null);
+  });
+
+  it("averages a region, so that two pictures of one scene can be compared", () => {
+    const rgb = picture(10, 4, (x) => (x < 5 ? [200, 0, 0] : [100, 50, 10]));
+    const pixels = decodePng(encode(10, 4, 3, 2, rgb, [1]));
+
+    assert.deepEqual(meanColour(pixels, { left: 0, top: 0, right: 0.5, bottom: 1 }), { r: 200, g: 0, b: 0 });
+    assert.deepEqual(meanColour(pixels, { left: 0.5, top: 0, right: 1, bottom: 1 }), { r: 100, g: 50, b: 10 });
+    assert.deepEqual(meanColour(pixels), { r: 150, g: 25, b: 5 });
   });
 });

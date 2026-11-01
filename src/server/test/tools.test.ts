@@ -371,22 +371,25 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.deepEqual(bridge.frames[0]?.params, { items: [{ ...roof, overhangMm: 0 }, { ...roof, overhangMm: 600.5 }] });
   });
 
-  it("passes materials with Cyrillic intact, and a transparency of 0 unless told otherwise", async (t) => {
+  it("passes materials with Cyrillic intact, and no transparency unless one is given, 0 included", async (t) => {
     const answer = { committed: true, items: [{ index: 0, status: "already_existed", elementId: "300291", warnings: ["Цвет другой"] }], warnings: [], errors: [], dialogs: [] };
     const { bridge, client } = await connect(t, (frame, connection) => connection.result(frame, answer));
 
     const result = await client.callTool({
       name: "create_materials",
-      arguments: { items: [material, { name: "Копия", baseMaterialId: "414" }, { name: "Стекло 2", colorRgb: { r: 0, g: 128, b: 192 }, transparency: 60 }] },
+      arguments: {
+        items: [material, { name: "Копия", baseMaterialId: "414" }, { name: "Стекло 2", colorRgb: { r: 0, g: 128, b: 192 }, transparency: 60 }, { name: "Плотное", baseMaterialId: "26", transparency: 0 }],
+      },
     });
 
     assert.ok(!result.isError);
     assert.equal(bridge.frames[0]?.method, "create_materials");
     assert.deepEqual(bridge.frames[0]?.params, {
       items: [
-        { ...material, transparency: 0 },
-        { name: "Копия", baseMaterialId: "414", transparency: 0 },
+        material,
+        { name: "Копия", baseMaterialId: "414" },
         { name: "Стекло 2", colorRgb: { r: 0, g: 128, b: 192 }, transparency: 60 },
+        { name: "Плотное", baseMaterialId: "26", transparency: 0 },
       ],
     });
     assert.deepEqual(JSON.parse(textOf(result)), answer);
@@ -449,7 +452,10 @@ describe("MCP tools", { timeout: 20_000 }, () => {
     assert.match(description, /such as brick or wood has none, and a call that asks for a colour .* is refused before anything changes/);
     assert.match(description, /whole number from 0 to 255/);
     assert.match(description, /0, opaque, to 100/);
-    assert.match(description, /applied to every material the tool makes/);
+    assert.match(description, /Left out, it is 0 for a new material, and a copy keeps the transparency of its base/);
+    assert.match(description, /refuses any value, 0 too, before anything changes/);
+    assert.match(description, /appearanceTransparency is null/);
+    assert.match(description, /A colour or a transparency you left out is not compared/);
     assert.match(description, /appearanceColorRgb is null/);
     assert.match(description, /left as it is/);
     assert.match(description, /create_type/);
