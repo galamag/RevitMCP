@@ -135,7 +135,7 @@ Spec, then plan with tasks, then a `feat/...` branch. Each task goes to a subage
 
 ## Vault
 
-- Project Obsidian vault: `D:\GalaObsidian\RevitVault`.
+- The project Obsidian vault is the folder in `permissions.additionalDirectories` of `.claude/settings.local.json` in the main checkout. That file is personal and not committed, so a fresh clone has no vault: without one, skip the vault steps.
 - Record every decision in `Журнал решений`: date, decision, reason.
 - Add new questions to `Открытые вопросы`, and move closed ones to the decision log.
 - Record verified API facts in `Справочник Revit API` with their source.
