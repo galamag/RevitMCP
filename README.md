@@ -6,6 +6,12 @@ An MCP server and a Revit plugin that let Claude build models in Autodesk Revit,
 
 Claude designed this 300 m² cottage and built it in Revit through these tools: 40 walls, 20 doors, 29 windows, 26 rooms, two staircases, a roof, furniture and a garden. Its drawings and material choices are in [`designs/cottage`](designs/cottage).
 
+![The cottage floor plans and section, labelled in Russian](designs/cottage/plan.svg)
+
+## Made with Claude Code
+
+The whole project was written with [Claude Code](https://claude.com/claude-code): the plugin, the MCP server, the tests, and the cottage itself. Claude Code agents in [`.claude/agents`](.claude/agents) wrote the code, reviewed every patch and tested it in live Revit, and then designed, built and inspected the cottage through the project's own tools. I set the goals, approved the designs and made the decisions.
+
 The project is experimental. It has been built and tested on one machine, and there are no prebuilt releases, so you build it from source.
 
 ## Requirements
